@@ -1,5 +1,7 @@
 <img src="assets/logo.png" alt="tui-samba" width="240">
 
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/tui-tools/tui-samba/badge)](https://scorecard.dev/viewer/?uri=github.com/tui-tools/tui-samba)
+
 A terminal UI for the Samba file server on this machine: the shares it exports,
 the accounts that can reach them, and who is connected right now. It lists the
 shares **worst first**, and it **previews the exact command line of every change
