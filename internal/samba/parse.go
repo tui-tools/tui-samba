@@ -31,6 +31,9 @@ func ParseTestparm(out string) (shares.Global, []shares.Share) {
 	global := shares.Global{Params: map[string]string{}}
 	var list []shares.Share
 	var current *shares.Share
+	// skipping is set inside a stanza whose parameters belong to nothing this
+	// tool models, so they are dropped rather than folded into the globals.
+	skipping := false
 
 	flush := func() {
 		if current != nil {
@@ -52,8 +55,17 @@ func ParseTestparm(out string) (shares.Global, []shares.Share) {
 			flush()
 			name := strings.TrimSpace(match[1])
 			if strings.EqualFold(name, "global") {
+				skipping = false
 				continue
 			}
+			// A stanza with no name between the brackets is not a share, and
+			// listing one would put a share on the screen that the editor
+			// could never write back. Its parameters are not global either.
+			if name == "" {
+				skipping = true
+				continue
+			}
+			skipping = false
 			current = &shares.Share{
 				Name:    name,
 				Special: IsSpecial(name),
@@ -67,7 +79,14 @@ func ParseTestparm(out string) (shares.Global, []shares.Share) {
 			// A diagnostic line, or the "# Global parameters" banner.
 			continue
 		}
+		if skipping {
+			continue
+		}
 		key = normalizeKey(key)
+		if key == "" {
+			// A line that is only "=" names no parameter.
+			continue
+		}
 		value = strings.TrimSpace(value)
 		if current == nil {
 			global.Params[key] = value
@@ -629,7 +648,12 @@ func ParseBooleans(out string) map[string]bool {
 		if !found {
 			continue
 		}
-		values[strings.TrimSpace(name)] = strings.TrimSpace(state) == "on"
+		// A line with nothing before the arrow names no boolean, and an entry
+		// under a blank name is one no caller can ever ask for.
+		if name = strings.TrimSpace(name); name == "" {
+			continue
+		}
+		values[name] = strings.TrimSpace(state) == "on"
 	}
 	return values
 }
