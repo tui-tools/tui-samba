@@ -2,9 +2,9 @@
 
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/tui-tools/tui-samba/badge)](https://scorecard.dev/viewer/?uri=github.com/tui-tools/tui-samba)
 
-> **Beta.** Beta: the family is days old and still changing. Package names,
-> flags and keys may move without notice until 1.0. Pin versions, and report
-> what breaks.
+> **Beta.** The family is days old and still changing. Package names, flags
+> and keys may move without notice until 1.0. Pin versions, and report what
+> breaks.
 
 A terminal UI for the Samba file server on this machine: the shares it exports,
 the accounts that can reach them, and who is connected right now. It lists the
