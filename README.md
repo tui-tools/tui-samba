@@ -2,6 +2,10 @@
 
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/tui-tools/tui-samba/badge)](https://scorecard.dev/viewer/?uri=github.com/tui-tools/tui-samba)
 
+> **Beta.** Beta: the family is days old and still changing. Package names,
+> flags and keys may move without notice until 1.0. Pin versions, and report
+> what breaks.
+
 A terminal UI for the Samba file server on this machine: the shares it exports,
 the accounts that can reach them, and who is connected right now. It lists the
 shares **worst first**, and it **previews the exact command line of every change
@@ -126,7 +130,7 @@ Upgrades then arrive with the rest of your system updates.
 ### Any distribution, static binary
 
 ```sh
-curl -fsSL https://github.com/tui-tools/tui-samba/releases/download/v0.1.1/tui-samba_0.1.1_linux_amd64.tar.gz | tar -xz tui-samba
+curl -fsSL https://github.com/tui-tools/tui-samba/releases/download/v0.1.2/tui-samba_0.1.2_linux_amd64.tar.gz | tar -xz tui-samba
 sudo install -m0755 tui-samba /usr/local/bin/tui-samba
 ```
 
@@ -628,6 +632,15 @@ widgets, the config loader and the command runner shared by the whole family.
   already been refused, which on nearly every machine never happens.
 - `tui-samba` re-reads the machine after every change, so what you see is what
   the system reports, not what the tool assumed.
+
+## Contributing
+
+Contributions arrive as pull requests: read
+[CONTRIBUTING.md](https://github.com/tui-tools/tui-kit/blob/main/CONTRIBUTING.md)
+in tui-kit, which covers the flow and the bar a change has to clear for every
+tool in the family. Vulnerabilities go through
+[SECURITY.md](https://github.com/tui-tools/tui-kit/blob/main/SECURITY.md)
+instead, privately, never in a public issue.
 
 ## License
 

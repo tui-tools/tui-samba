@@ -209,7 +209,7 @@
     "no_network": false,
     "no_network_note": "One key runs `smbclient -L localhost -N`, which opens a connection to this machine's own SMB port to read the share list an anonymous client is shown. It is previewed and confirmed like every other command, and sends no password. Nothing else here opens a socket.",
     "static_binary": true,
-    "signed_releases": false,
+    "signed_releases": true,
     "config_paths": [
       "/etc/tui-samba/config.toml",
       "~/.config/tui-samba/config.toml"
