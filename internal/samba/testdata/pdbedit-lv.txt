@@ -1,0 +1,44 @@
+---------------
+Unix username:        alice
+NT username:
+Account Flags:        [U          ]
+User SID:             S-1-5-21-1234567890-1234567890-1234567890-1000
+Primary Group SID:    S-1-5-21-1234567890-1234567890-1234567890-513
+Full Name:            Alice Alves
+Home Directory:       \\fileserver\alice
+HomeDir Drive:
+Logon Script:
+Profile Path:         \\fileserver\alice\profile
+Domain:               FILESERVER
+Account desc:
+Workstations:
+Munged dial:
+Logon time:           0
+Logoff time:          never
+Kickoff time:         never
+Password last set:    Mon, 03 Aug 2026 09:14:22 -03
+Password can change:  Mon, 03 Aug 2026 09:14:22 -03
+Password must change: never
+Last bad password   : 0
+Bad password count  : 0
+Logon hours         : FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+---------------
+Unix username:        carol
+NT username:
+Account Flags:        [DU         ]
+User SID:             S-1-5-21-1234567890-1234567890-1234567890-1002
+Primary Group SID:    S-1-5-21-1234567890-1234567890-1234567890-513
+Full Name:            Carol Costa
+Home Directory:       \\fileserver\carol
+Password last set:    Fri, 12 Jun 2026 17:02:11 -03
+Password must change: never
+---------------
+Unix username:        svc-backup
+NT username:
+Account Flags:        [NU         ]
+User SID:             S-1-5-21-1234567890-1234567890-1234567890-1099
+Primary Group SID:    S-1-5-21-1234567890-1234567890-1234567890-513
+Full Name:
+Home Directory:
+Password last set:    Tue, 04 Feb 2025 08:00:00 -03
+Password must change: never

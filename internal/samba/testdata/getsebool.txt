@@ -1,0 +1,2 @@
+samba_export_all_rw --> off
+samba_export_all_ro --> on

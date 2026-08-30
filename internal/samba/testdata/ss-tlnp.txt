@@ -1,0 +1,6 @@
+State    Recv-Q   Send-Q     Local Address:Port      Peer Address:Port  Process
+LISTEN   0        50               0.0.0.0:445            0.0.0.0:*      users:(("smbd",pid=2841,fd=41))
+LISTEN   0        50               0.0.0.0:139            0.0.0.0:*      users:(("smbd",pid=2841,fd=39))
+LISTEN   0        4096           127.0.0.54:53             0.0.0.0:*
+LISTEN   0        50                  [::]:445               [::]:*      users:(("smbd",pid=2841,fd=42))
+LISTEN   0        128                    *:22                   *:*

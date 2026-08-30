@@ -1,0 +1,16 @@
+Samba version 4.15.13
+
+PID     Username     Group        Machine                                   Protocol Version  Encryption           Signing
+------------------------------------------------------------------------------------------------------------------------
+2841    alice        alice        192.168.1.50 (ipv4:192.168.1.50:49731)    SMB3_11           -                    AES-128-GMAC
+2903    nobody       nobody       192.168.1.77 (ipv4:192.168.1.77:52204)    SMB3_11           AES-128-GMAC         AES-128-GMAC
+
+Service      pid     Machine       Connected at                     Encryption   Signing
+----------------------------------------------------------------------------------------
+team         2841    192.168.1.50  Sun Aug 30 08:12:44 2026 -03     -            AES-128-GMAC
+public       2903    192.168.1.77  Sun Aug 30 09:38:10 2026 -03     -            AES-128-GMAC
+
+Locked files:
+Pid          User(ID)   DenyMode   Access      R/W        Oplock           SharePath   Name   Time
+--------------------------------------------------------------------------------------------------
+2841         1000       DENY_NONE  0x100081    RDONLY     LEVEL_II         /srv/team   budget.ods   Sun Aug 30 08:13:02 2026

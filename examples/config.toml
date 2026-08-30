@@ -1,14 +1,17 @@
-# tui-template configuration.
+# tui-samba configuration.
 #
-# Read from /etc/tui-template/config.toml first, then
-# ~/.config/tui-template/config.toml, with the user file overriding the
-# machine-wide one. TUI_TEMPLATE_* environment variables override both, and
+# Read from /etc/tui-samba/config.toml first, then
+# ~/.config/tui-samba/config.toml, with the user file overriding the
+# machine-wide one. TUI_SAMBA_* environment variables override both, and
 # command line flags override everything.
 
-# This tool's own key: the directory to list. Replace it with yours.
-dir = "."
+# Where smb.conf is. Empty asks the server itself: testparm names the file it
+# read on its first line, which is the honest answer on a machine whose Samba
+# was built with a different prefix.
+config = ""
 
-# Privilege escalation prefix used for actions; "" runs the command directly.
+# Privilege escalation prefix used for actions; "" runs the command directly,
+# which is what to set when running as root.
 sudo = "sudo -n"
 
 # Path to an Omarchy-style colors.toml. Empty follows the active Omarchy
@@ -16,5 +19,5 @@ sudo = "sudo -n"
 theme = ""
 
 # Every key can also be set in the environment, upper-cased and prefixed:
-#   TUI_TEMPLATE_DIR=/srv
-#   TUI_TEMPLATE_SUDO="doas"
+#   TUI_SAMBA_CONFIG=/usr/local/samba/etc/smb.conf
+#   TUI_SAMBA_SUDO="doas"

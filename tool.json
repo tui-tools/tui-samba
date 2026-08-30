@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "name": "tui-template",
-  "binary": "tui-template",
-  "tagline": "A working skeleton for a new tui-tools tool",
-  "description": "The starting point for a new tool in the family. Press **Use this template**, rename it, replace one package, and you have a tool that looks and behaves like the rest.\n\nIt is not a pile of TODOs: it is a working tool. It lists the files in a directory and can update a file's timestamp, which is deliberately trivial — what matters is the shape around it, and that shape is already correct: the action table that generates the key map, the help screen and the confirm dialog; the backend interface with a real and a fake implementation; `--demo`; CI; and GoReleaser.\n\nThis `tool.json` is itself the example. It is a valid manifest, validated against [the schema](https://github.com/tui-tools/tui-kit/blob/main/schema/tool.schema.json) on every CI run, and the values are the ones you replace.",
-  "category": "template",
-  "homepage": "https://github.com/tui-tools/tui-template",
-  "repo": "https://github.com/tui-tools/tui-template",
+  "name": "tui-samba",
+  "binary": "tui-samba",
+  "tagline": "Samba shares, accounts and live connections, with every change previewed",
+  "description": "A terminal UI for a Samba file server: the shares it exports, the accounts that can reach them, and who is connected right now.\n\nThe shares are listed worst first. A path that does not exist, a directory somebody left at mode 0777, a writable share open to guests — each one is a sentence on the row rather than something to work out from `testparm` output and a `stat`. The configuration comes from `testparm -s`, which is what the server resolved rather than what anybody typed, and every share carries the Unix permissions, the owner and the SELinux label of the directory behind it.\n\nA change goes through Samba's own parser before it goes anywhere near /etc. A share is edited in a guided form, staged to a file, read back with `testparm -s` and shown as a diff — and only then confirmed. It is installed with `install -m 644` and picked up with `smbcontrol all reload-config`, which disconnects nobody.\n\nThis is a file server tool. Samba as an Active Directory domain controller is deliberately out of scope.\n\nRun `tui-samba --demo` to drive a sample server: every key works, every command is built and previewed for real, and nothing touches your system.",
+  "category": "file-sharing",
+  "homepage": "https://github.com/tui-tools/tui-samba",
+  "repo": "https://github.com/tui-tools/tui-samba",
   "license": "MIT",
   "platforms": [
     "linux/amd64",
@@ -16,30 +16,74 @@
   "logo": "assets/logo.png",
   "screenshots": [
     {
-      "path": "docs/screenshots/tui-template-main.png",
-      "caption": "The list: the four bands every tool in the family draws"
+      "path": "docs/screenshots/tui-samba-main.png",
+      "caption": "Every share on one list, worst first: what it exports, who may reach it, and the Unix mode of the directory behind it"
     },
     {
-      "path": "docs/screenshots/tui-template-touch.png",
-      "caption": "The confirm dialog, showing the exact command line before it runs"
+      "path": "docs/screenshots/tui-samba-detail.png",
+      "caption": "One share in full: the findings, the directory's own permissions and label, who has it open, and every effective parameter"
     },
     {
-      "path": "docs/screenshots/tui-template-help.png",
-      "caption": "The help screen, generated from the action table"
+      "path": "docs/screenshots/tui-samba-users.png",
+      "caption": "The Samba password database: who exists, who is disabled, and which entries have no Unix account behind them"
+    },
+    {
+      "path": "docs/screenshots/tui-samba-connections.png",
+      "caption": "Who is connected right now, the shares each session has open, and the files under them"
+    },
+    {
+      "path": "docs/screenshots/tui-samba-edit.png",
+      "caption": "The share editor, warning about the combination that turns a file server into a drop box as it becomes true"
+    },
+    {
+      "path": "docs/screenshots/tui-samba-help.png",
+      "caption": "The help screen, generated from the same key table as the hint bar"
     }
   ],
   "keys": [
     {
+      "key": "tab / 1-4",
+      "action": "Move between the shares, the accounts, the live connections and the server itself"
+    },
+    {
+      "key": "enter",
+      "action": "Open the selected row in full"
+    },
+    {
+      "key": "e",
+      "action": "Edit the selected share, checked by testparm and shown as a diff first"
+    },
+    {
+      "key": "n",
+      "action": "Add a share, written to a drop-in of its own"
+    },
+    {
+      "key": "a",
+      "action": "Add a Samba account, its password read from standard input"
+    },
+    {
+      "key": "p",
+      "action": "Set the selected account's password"
+    },
+    {
+      "key": "E / D",
+      "action": "Enable or disable the selected account"
+    },
+    {
+      "key": "x",
+      "action": "Remove the selected account from the Samba database, leaving the Unix one"
+    },
+    {
+      "key": "r",
+      "action": "Tell the running server to re-read its configuration"
+    },
+    {
       "key": "t",
-      "action": "Touch the selected file"
+      "action": "Ask the server what an anonymous client on the network sees"
     },
     {
       "key": "/",
-      "action": "Filter the list"
-    },
-    {
-      "key": "r / ctrl+r",
-      "action": "Re-read the directory"
+      "action": "Filter the rows of the current screen"
     },
     {
       "key": "?",
@@ -52,84 +96,120 @@
   ],
   "backends": [
     {
-      "name": "coreutils",
-      "binary": "touch",
+      "name": "samba",
+      "binary": "smbd",
       "versionCommand": [
-        "touch",
+        "smbd",
         "--version"
       ],
-      "versionRegex": "coreutils\\) ([0-9][0-9.]*)",
-      "minimum": "8.0",
+      "versionRegex": "Version ([0-9]+(\\.[0-9]+){0,2})",
+      "minimum": "4.11",
       "searchPaths": [
-        "/usr/bin/touch",
-        "/bin/touch"
+        "/usr/sbin/smbd",
+        "/sbin/smbd",
+        "/usr/local/sbin/smbd"
       ],
       "features": [
         {
-          "name": "no-dereference",
-          "since": "8.1"
+          "name": "status-json",
+          "since": "4.17"
         }
       ],
       "notes": [
         {
-          "range": "<8.1",
-          "impact": "`touch -h` is missing, so the timestamp of a symlink is set on its target instead of on the link"
+          "range": "<4.17",
+          "impact": "`smbstatus --json` does not exist, so the connections are read from the text output; the sessions, the shares in use and the open files are all there, and the per-session encryption is whatever those columns carry"
+        },
+        {
+          "range": ">=4.17",
+          "impact": "`smbstatus --json` is used, so a session's dialect, signing and encryption come from Samba's own document instead of from columns separated by runs of spaces a value may also contain"
+        },
+        {
+          "range": ">=4.11",
+          "impact": "SMB1 is off by default from this release, so a `server min protocol` below SMB2 is something somebody set on purpose — which is why tui-samba raises it and says nothing about a server on the default"
+        },
+        {
+          "range": ">=4.11",
+          "impact": "`testparm --show-all-parameters` is not used at all: it prints every parameter Samba has rather than this server's, so the effective configuration comes from `testparm -s`"
+        },
+        {
+          "range": ">=4.11",
+          "impact": "a machine may have no Samba at all, and that is a normal machine rather than a failure: the tool says so on its first screen and `--check` reports it as `\"installed\": false` and exits 0"
         }
-      ]
+      ],
+      "tested": []
     }
   ],
   "install": {
-    "source": {
-      "available": true,
-      "command": "git clone https://github.com/tui-tools/tui-template\ncd tui-template && make demo",
-      "url": "https://github.com/tui-tools/tui-template",
-      "note": "Or press \"Use this template\" on GitHub, which is the point of it."
-    },
     "pacman": {
       "available": false,
-      "package": "tui-template",
+      "package": "tui-samba",
       "repo": "tui-tools",
       "requires_repo_setup": true,
-      "command": "sudo pacman -S tui-template",
+      "command": "sudo pacman -S tui-samba",
       "url": "https://pkgs.tui.tools/arch",
-      "note": "The template is never packaged. This entry shows your tool's shape."
+      "note": "Add the tui-tools repository to pacman.conf first."
+    },
+    "aur": {
+      "available": false,
+      "package": "tui-samba-bin",
+      "repo": "aur",
+      "command": "paru -S tui-samba-bin",
+      "url": "https://aur.archlinux.org/packages/tui-samba-bin",
+      "note": "The -bin package installs the released static binary."
     },
     "apt": {
       "available": false,
-      "package": "tui-template",
+      "package": "tui-samba",
       "repo": "tui-tools",
       "requires_repo_setup": true,
-      "command": "sudo apt install tui-template",
+      "command": "sudo apt install tui-samba",
       "url": "https://pkgs.tui.tools/deb",
-      "note": "The template is never packaged. This entry shows your tool's shape."
+      "note": "Add the tui-tools apt repository and its keyring first."
     },
     "dnf": {
       "available": false,
-      "package": "tui-template",
+      "package": "tui-samba",
       "repo": "tui-tools",
       "requires_repo_setup": true,
-      "command": "sudo dnf install tui-template",
+      "command": "sudo dnf install tui-samba",
       "url": "https://pkgs.tui.tools/rpm",
-      "note": "The template is never packaged. This entry shows your tool's shape."
+      "note": "Add the tui-tools.repo file first."
+    },
+    "zypper": {
+      "available": false,
+      "package": "tui-samba",
+      "repo": "tui-tools",
+      "requires_repo_setup": true,
+      "command": "sudo zypper install tui-samba",
+      "url": "https://pkgs.tui.tools/rpm",
+      "note": "Add the tui-tools repository first."
     },
     "binary": {
-      "available": false,
-      "pattern": "tui-template_{version}_linux_{arch}.tar.gz",
-      "command": "curl -fsSL https://github.com/tui-tools/tui-template/releases/download/v{version}/tui-template_{version}_linux_{arch}.tar.gz | tar -xz tui-template\nsudo install -m0755 tui-template /usr/local/bin/tui-template",
-      "url": "https://github.com/tui-tools/tui-template/releases",
-      "note": "The template is never released. Your tool is, once you tag v0.1.0."
+      "available": true,
+      "pattern": "tui-samba_{version}_linux_{arch}.tar.gz",
+      "command": "curl -fsSL https://github.com/tui-tools/tui-samba/releases/download/v{version}/tui-samba_{version}_linux_{arch}.tar.gz | tar -xz tui-samba\nsudo install -m0755 tui-samba /usr/local/bin/tui-samba",
+      "url": "https://github.com/tui-tools/tui-samba/releases",
+      "note": "One static binary. Verify it against checksums.txt from the same release."
+    },
+    "source": {
+      "available": true,
+      "command": "git clone https://github.com/tui-tools/tui-samba\ncd tui-samba && make build\nsudo install -m0755 bin/tui-samba /usr/local/bin/tui-samba",
+      "url": "https://github.com/tui-tools/tui-samba",
+      "note": "Needs Go 1.27 or newer."
     }
   },
   "security": {
-    "needs_sudo": "Only the touch action escalates, and only when the configured prefix is non-empty. Listing a directory is an ordinary read. Replace this sentence with what your own tool escalates for.",
+    "needs_sudo": "Reading the configuration usually needs nothing: smb.conf is world-readable. The password database and `smbstatus` are root-only, and every change escalates through `sudo -n`, which never prompts: writing a share, reloading the server, and every smbpasswd call.",
     "preview_before_run": true,
     "no_daemon": true,
-    "no_network": true,
+    "no_network": false,
+    "no_network_note": "One key runs `smbclient -L localhost -N`, which opens a connection to this machine's own SMB port to read the share list an anonymous client is shown. It is previewed and confirmed like every other command, and sends no password. Nothing else here opens a socket.",
     "static_binary": true,
     "signed_releases": false,
     "config_paths": [
-      "/etc/tui-template/config.toml",
-      "~/.config/tui-template/config.toml"
+      "/etc/tui-samba/config.toml",
+      "~/.config/tui-samba/config.toml"
     ]
   },
   "maintainers": [
@@ -138,12 +218,19 @@
       "github": "edimarlnx"
     }
   ],
-  "since": "2026-08-29",
+  "since": "2026-08-30",
   "keywords": [
-    "template",
-    "scaffold",
-    "bubbletea",
-    "starter"
-  ],
-  "unreleased": true
+    "samba",
+    "smb",
+    "cifs",
+    "smb.conf",
+    "testparm",
+    "smbstatus",
+    "smbpasswd",
+    "file-server",
+    "shares",
+    "windows",
+    "tui",
+    "bubbletea"
+  ]
 }

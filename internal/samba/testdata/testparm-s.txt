@@ -1,0 +1,50 @@
+Load smb config files from /etc/samba/smb.conf
+Loaded services file OK.
+Weak crypto is allowed by GnuTLS
+Server role: ROLE_STANDALONE
+
+# Global parameters
+[global]
+	log file = /var/log/samba/log.%m
+	map to guest = Bad User
+	max log size = 50
+	printcap name = cups
+	security = USER
+	server min protocol = NT1
+	server string = Samba %v
+	workgroup = WORKGROUP
+	idmap config * : backend = tdb
+	cups options = raw
+
+
+[homes]
+	browseable = No
+	comment = Home Directories
+	inherit permissions = Yes
+	read only = No
+	valid users = %S %D%w%S
+
+
+[printers]
+	browseable = No
+	comment = All Printers
+	create mask = 0600
+	path = /var/tmp
+	printable = Yes
+
+
+[public]
+	comment = Public files
+	guest ok = Yes
+	path = /srv/public
+	read only = No
+
+
+[team]
+	comment = Team share
+	create mask = 0664
+	directory mask = 2775
+	path = /srv/team
+	read only = No
+	valid users = alice bob
+	vfs objects = recycle
