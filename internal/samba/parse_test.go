@@ -15,7 +15,7 @@ import (
 // program changes its mind.
 func fixture(t *testing.T, name string) string {
 	t.Helper()
-	body, err := os.ReadFile(filepath.Join("testdata", name))
+	body, err := os.ReadFile(filepath.Join("testdata", name)) //nolint:gosec // the name is a literal in the test above, and testdata is in the repository
 	if err != nil {
 		t.Fatalf("read %s: %v", name, err)
 	}

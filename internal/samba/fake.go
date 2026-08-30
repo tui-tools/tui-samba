@@ -138,7 +138,7 @@ const demoTeamConf = `# Written by tui-samba. This file is included from smb.con
 
 // demoPasswordSet is when the sample accounts last had a password set, in the
 // format pdbedit prints.
-const demoPasswordSet = "Mon, 03 Aug 2026 09:14:22 -03"
+const demoPasswordSet = "Mon, 03 Aug 2026 09:14:22 -03" //nolint:gosec // a timestamp, not a credential: it is when the sample accounts were last changed
 
 // demoStatusJSON is what `smbstatus --json` answers on the sample machine.
 //
