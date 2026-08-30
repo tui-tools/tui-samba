@@ -379,6 +379,7 @@ not browseable is real and will not be in it.
 tui-samba                        # read this machine
 tui-samba --demo                 # sample server, no privileges needed
 tui-samba --check                # read, print JSON, exit
+tui-samba --report               # print what a bug report needs, exit
 tui-samba --config /srv/smb.conf # a Samba built with a different prefix
 tui-samba --theme ~/mytheme/colors.toml
 tui-samba --sudo ""              # run the commands directly (as root)
@@ -418,6 +419,45 @@ It exists so a test can assert on what the tool *parsed* rather than on what it
 painted. [tui-lab](https://github.com/tui-tools/tui-lab) uses it to test this
 tool against real machines on Ubuntu, Fedora and Arch; the assertions live in
 [`test/smoke.sh`](test/smoke.sh), and every one of them is read-only.
+
+### `--report`, for bug reports
+
+`--report` prints, in one block, everything a maintainer has to ask for
+otherwise: the tool and kit versions, the Samba version probed off `smbd`,
+which of the two connection readers that version gets, whether `smb.conf` was
+looked for where the server keeps it, the distribution, the kernel, the
+terminal, the theme, the escalation prefix, and whether the running binary came
+from a package. It needs no privileges and reads no file server, so it works on
+the machine where the bug is — including one with no Samba on it at all, which
+is most machines and is itself worth reporting.
+
+```console
+$ tui-samba --report
+tui-samba 0.1.0 (kit v0.2.9)
+backend: samba 4.24.6
+mode: live
+distro: fedora 42 (Fedora Linux 42 (Workstation Edition))
+kernel: 6.19.14-108.fc42.x86_64
+arch: x86_64
+locale: en_US.UTF-8
+term: xterm-256color
+theme: tokyo-night
+sudo: sudo -n
+root: no
+binary: /usr/bin/tui-samba (packaged)
+connections: smbstatus --json
+smb.conf: as the server reports it
+```
+
+The block is written to be published as it is: it carries no hostname, user
+name, home path or address, and no environment variable beyond `LANG`,
+`LC_ALL`, `TERM` and `TERM_PROGRAM`. A binary living under your home directory
+is reported as being there without naming the path, and the `--config` path is
+reported as set rather than spelled out, for the same reason. `--report` works
+with `--demo` too, where it says so on the `mode` line.
+
+The bug form asks for this block first — see
+[`.github/ISSUE_TEMPLATE/bug_report.yml`](.github/ISSUE_TEMPLATE/bug_report.yml).
 
 ## What it can do to your machine
 
