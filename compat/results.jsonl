@@ -1,0 +1,1 @@
+{"backend": "samba", "date": "2026-08-30", "distro": "fedora-44", "result": "pass", "suite": "smoke", "tool": "tui-samba", "version": "4.24.6"}

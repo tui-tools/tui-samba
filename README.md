@@ -27,7 +27,7 @@ whether any of it is running. `tui-samba` puts them on one screen, in the
 ### Any distribution, static binary
 
 ```sh
-curl -fsSL https://github.com/tui-tools/tui-samba/releases/download/v{version}/tui-samba_{version}_linux_amd64.tar.gz | tar -xz tui-samba
+curl -fsSL https://github.com/tui-tools/tui-samba/releases/download/v0.1.0/tui-samba_0.1.0_linux_amd64.tar.gz | tar -xz tui-samba
 sudo install -m0755 tui-samba /usr/local/bin/tui-samba
 ```
 
@@ -458,7 +458,7 @@ hidden; one below the minimum is marked as such and the tool still runs.
 | Binary | `smbd` |
 | Version read with | `smbd --version` |
 | Minimum | 4.11 |
-| Tested | none yet |
+| Tested | `4.24.6` |
 | Version-gated features | `status-json` (since 4.17) |
 
 | Versions | What changes |

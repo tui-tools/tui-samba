@@ -137,7 +137,9 @@
           "impact": "a machine may have no Samba at all, and that is a normal machine rather than a failure: the tool says so on its first screen and `--check` reports it as `\"installed\": false` and exits 0"
         }
       ],
-      "tested": []
+      "tested": [
+        "4.24.6"
+      ]
     }
   ],
   "install": {
