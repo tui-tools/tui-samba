@@ -746,9 +746,7 @@ func helpKeys() []ui.KeyHint {
 		{Key: "?", Desc: "this help"},
 		{Key: "q", Desc: "quit"},
 		{Key: "", Desc: ""},
-		{Key: "note", Desc: "every change is previewed and confirmed first"},
-		{Key: "note", Desc: "a share is checked by testparm before you are asked"},
-		{Key: "note", Desc: "a password is never put in a command line"},
-		{Key: "note", Desc: "no session is ever closed and no service restarted"},
+		{Key: "note", Desc: "every change is previewed, and a share is checked by testparm first"},
+		{Key: "note", Desc: "no password reaches a command line, no session is closed, nothing restarts"},
 	}
 }
