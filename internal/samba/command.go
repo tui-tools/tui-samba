@@ -63,13 +63,46 @@ const ConfigPath = "/etc/samba/smb.conf"
 // would be inventing a Samba feature.
 const DropInDir = "/etc/samba/tui-samba.d"
 
-// The modes a written file and the drop-in directory get. Neither carries a
-// secret: smb.conf is world-readable on every distribution, and a mode that
-// hid it from the server would be a mode the server could not read.
+// GlobalDropIn is the file tui-samba writes the server-wide settings into.
+//
+// One file, with a fixed name, reached by the same `include` mechanism a share
+// drop-in is reached by. It is not a share, so it has no name of its own to
+// take: the name is reserved, and CheckShareName refuses a share that would
+// land on the same file.
+const GlobalDropIn = DropInDir + "/tui-samba-global.conf"
+
+// globalDropInName is the reserved stanza name behind GlobalDropIn, without
+// its directory or its suffix.
+const globalDropInName = "tui-samba-global"
+
+// The modes a written file, the drop-in directory and a share directory this
+// tool creates get. The first two carry no secret: smb.conf is world-readable
+// on every distribution, and a mode that hid it from the server would be a
+// mode the server could not read. ShareDirMode is 2775 for the setgid bit,
+// which is what keeps a shared directory's group on everything created in it.
 const (
-	FileMode = "644"
-	DirMode  = "755"
+	FileMode     = "644"
+	DirMode      = "755"
+	ShareDirMode = "2775"
 )
+
+// SELinuxShareType is the label a directory needs before Samba may export it
+// on a machine with SELinux enforcing. Without it a share can be right in
+// smb.conf, right in its Unix modes, and still refuse every client — and
+// nothing Samba prints says so.
+const SELinuxShareType = "samba_share_t"
+
+// MinProtocols are the values `server min protocol` is offered as, strictest
+// first so the safe answer is the one a picker opens on.
+//
+// It is a short list rather than every dialect Samba names: LANMAN and CORE
+// are museum pieces, and a form that offered them would be offering a way to
+// make a server worse in one keystroke. NT1 is the last entry because it is
+// SMB1 — the protocol WannaCry travelled on — and somebody may still have a
+// device that speaks nothing else.
+var MinProtocols = []string{
+	"SMB3_11", "SMB3_02", "SMB3_00", "SMB2_10", "SMB2_02", "NT1",
+}
 
 // The stanzas this tool will not write. [global] is not a share; [homes],
 // [printers] and [print$] are shares whose meaning comes from Samba itself,
@@ -135,6 +168,12 @@ func CheckShareName(name string) error {
 			"samba: [%s] is one of Samba's own sections, not a directory "+
 				"export — tui-samba shows it and will not rewrite it", name)
 	}
+	if strings.EqualFold(name, globalDropInName) {
+		return fmt.Errorf(
+			"samba: %s is the name tui-samba keeps for the server-wide "+
+				"settings it writes, so a share cannot take it — press g to "+
+				"edit those, and call the share something else", globalDropInName)
+	}
 	if !shareNameRe.MatchString(name) {
 		return fmt.Errorf(
 			"samba: %q is not a share name — letters, digits, dot, dash and "+
@@ -160,6 +199,76 @@ func CheckPath(value string) error {
 		return fmt.Errorf(
 			"samba: %q is not a path tui-samba will write into a configuration "+
 				"file", value)
+	}
+	return nil
+}
+
+// workgroupRe is what a workgroup may be called. It is a NetBIOS name, so
+// fifteen characters is the ceiling the protocol itself imposes and anything
+// longer is truncated by whatever reads it.
+var workgroupRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,14}$`)
+
+// hostSpecRe accepts one entry of a `hosts allow` list, in the four forms
+// Samba's own host access syntax carries: an address, a network prefix ending
+// in a dot, an address with a mask or a prefix length, and a name or a domain
+// suffix beginning with a dot.
+var hostSpecRe = regexp.MustCompile(
+	`^(\.?[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?` +
+		`|[0-9.]+(/([0-9]{1,2}|[0-9.]+))?` +
+		`|[0-9A-Fa-f:]+(/[0-9]{1,3})?)$`)
+
+// hostKeywords are the words Samba's host access syntax gives a meaning of
+// their own, which no regular expression above should have to spell.
+var hostKeywords = map[string]bool{
+	"ALL": true, "LOCAL": true, "EXCEPT": true,
+}
+
+// CheckWorkgroup rejects a workgroup this tool will not write.
+func CheckWorkgroup(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("samba: a workgroup cannot be empty")
+	}
+	if !workgroupRe.MatchString(value) {
+		return fmt.Errorf(
+			"samba: %q is not a workgroup — it is a NetBIOS name, so letters, "+
+				"digits, dash and underscore only, and at most 15 of them", value)
+	}
+	return nil
+}
+
+// CheckMinProtocol rejects a dialect this tool does not offer.
+func CheckMinProtocol(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("samba: a minimum protocol has to be one of %s",
+			strings.Join(MinProtocols, ", "))
+	}
+	for _, candidate := range MinProtocols {
+		if strings.EqualFold(candidate, value) {
+			return nil
+		}
+	}
+	return fmt.Errorf(
+		"samba: %q is not a dialect tui-samba writes — it offers %s", value,
+		strings.Join(MinProtocols, ", "))
+}
+
+// CheckHostSpec rejects one entry of a host access list.
+func CheckHostSpec(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("samba: a host list entry cannot be empty")
+	}
+	if hostKeywords[strings.ToUpper(value)] {
+		return nil
+	}
+	if !hostSpecRe.MatchString(value) {
+		return fmt.Errorf(
+			"samba: %q is not a host, a network or a name — `hosts allow` takes "+
+				"an address (192.168.1.5), a network (192.168.1. or "+
+				"192.168.1.0/24), a name, or a domain suffix (.example.com)",
+			value)
 	}
 	return nil
 }
@@ -338,6 +447,78 @@ func checkMask(label, value string) (string, error) {
 	return value, nil
 }
 
+// globalManaged are the [global] parameters the server-wide form collects, and
+// therefore the only ones RenderGlobal rewrites.
+var globalManaged = map[string]bool{
+	"workgroup":           true,
+	"server min protocol": true, "min protocol": true,
+	"hosts allow": true, "allow hosts": true,
+}
+
+// RenderGlobal turns the server-wide form into the [global] stanza of this
+// tool's own drop-in.
+//
+// Three parameters, and everything else the drop-in already carried kept as it
+// is — the same rule a share edit follows, for the same reason: a form that
+// regenerated the section would write out every default Samba has and bury the
+// three lines somebody actually chose.
+func RenderGlobal(req shares.GlobalRequest, keep []string) ([]string, error) {
+	workgroup := strings.TrimSpace(req.Workgroup)
+	if err := CheckWorkgroup(workgroup); err != nil {
+		return nil, err
+	}
+	if err := checkValue("a workgroup", workgroup); err != nil {
+		return nil, err
+	}
+	minProtocol := strings.ToUpper(strings.TrimSpace(req.MinProtocol))
+	if err := CheckMinProtocol(minProtocol); err != nil {
+		return nil, err
+	}
+
+	var hosts []string
+	for _, entry := range SplitList(req.HostsAllow) {
+		if err := CheckHostSpec(entry); err != nil {
+			return nil, fmt.Errorf("hosts allow: %w", err)
+		}
+		hosts = append(hosts, entry)
+	}
+
+	lines := []string{"[global]"}
+	add := func(key, value string) {
+		if value != "" {
+			lines = append(lines, "\t"+key+" = "+value)
+		}
+	}
+	add("workgroup", workgroup)
+	add("server min protocol", minProtocol)
+	add("hosts allow", strings.Join(hosts, " "))
+	lines = append(lines, keep...)
+	return lines, nil
+}
+
+// KeepGlobalLines are the lines of an existing global drop-in this tool does
+// not touch: everything except the three parameters the form collects.
+func KeepGlobalLines(stanza []string) []string {
+	var kept []string
+	for _, line := range stanza {
+		if sectionRe.MatchString(line) {
+			continue
+		}
+		key, _, found := strings.Cut(line, "=")
+		if !found {
+			if strings.TrimSpace(line) != "" {
+				kept = append(kept, line)
+			}
+			continue
+		}
+		if globalManaged[normalizeKey(key)] {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return kept
+}
+
 // Header is the banner tui-samba writes above a file it created. An existing
 // smb.conf never gets one: the file belongs to whoever wrote it, and a tool
 // that stamped its name on somebody else's configuration would be claiming it.
@@ -379,6 +560,80 @@ func BuildInstall(staged, destination string) (shares.Command, error) {
 	return shares.Command{
 		Argv:        []string{"install", "-m", FileMode, staged, destination},
 		Description: "Install " + staged + " as " + destination,
+		Destructive: true,
+	}, nil
+}
+
+// validDropIn accepts a file this tool will delete, which is only ever one of
+// its own drop-ins. The server's own configuration is deliberately not in it:
+// smb.conf is rewritten, never removed.
+func validDropIn(path string) bool {
+	if strings.Contains(path, "..") || path == ConfigPath {
+		return false
+	}
+	rest, found := strings.CutPrefix(path, DropInDir+"/")
+	return found && strings.HasSuffix(rest, ".conf") &&
+		shareNameRe.MatchString(strings.TrimSuffix(rest, ".conf"))
+}
+
+// BuildRemoveDropIn deletes one file this tool wrote.
+//
+// `--` ends the options, so a file name is never read as a flag, and the path
+// is checked against the one directory this tool owns before it reaches an
+// argv: nothing else on the machine can be named here.
+func BuildRemoveDropIn(path string) (shares.Command, error) {
+	if !validDropIn(path) {
+		return shares.Command{}, fmt.Errorf(
+			"samba: %q is not a file tui-samba wrote — it only removes a .conf "+
+				"in %s", path, DropInDir)
+	}
+	return shares.Command{
+		Argv:        []string{"rm", "-f", "--", path},
+		Description: "Remove " + path,
+		Destructive: true,
+	}, nil
+}
+
+// BuildMakeShareDir creates the directory a new share exports.
+//
+// `install -d` rather than `mkdir` for the same reason the file install uses
+// it: the mode and the ownership are set in the same call, so there is no
+// window where the directory is on disk world-readable or owned by root when
+// it was meant to belong to a group.
+func BuildMakeShareDir(path, owner, group string) (shares.Command, error) {
+	if err := CheckPath(path); err != nil {
+		return shares.Command{}, err
+	}
+	if err := CheckUser(owner); err != nil {
+		return shares.Command{}, fmt.Errorf("the owner: %w", err)
+	}
+	if err := CheckUser(group); err != nil {
+		return shares.Command{}, fmt.Errorf("the group: %w", err)
+	}
+	return shares.Command{
+		Argv: []string{"install", "-d", "-m", ShareDirMode, "-o", owner,
+			"-g", group, path},
+		Description: "Create " + path + ", owned by " + owner + ":" + group +
+			" and mode " + ShareDirMode + " so the group keeps everything made in it",
+		Destructive: true,
+	}, nil
+}
+
+// BuildLabelShareDir gives a new directory the SELinux type Samba needs to
+// export it.
+//
+// It is built only for a machine whose policy is enforcing, because on one
+// where it is not the command would change a label nothing reads. On one where
+// it is, the label is the difference between a share that works and a share
+// that refuses every client for a reason Samba never prints.
+func BuildLabelShareDir(path string) (shares.Command, error) {
+	if err := CheckPath(path); err != nil {
+		return shares.Command{}, err
+	}
+	return shares.Command{
+		Argv: []string{"chcon", "-t", SELinuxShareType, path},
+		Description: "Label " + path + " " + SELinuxShareType +
+			", which SELinux requires before Samba may export it",
 		Destructive: true,
 	}, nil
 }
@@ -586,6 +841,35 @@ func AddInclude(existing, line string) (string, error) {
 	out = append(out, "\t"+line)
 	out = append(out, lines[insert:]...)
 	return strings.Join(out, "\n") + "\n", nil
+}
+
+// RemoveInclude drops every `include =` line pointing at one file, and returns
+// the text unchanged when there is none.
+//
+// The whole line goes, indentation included, because the line exists only to
+// reach a file that is about to stop existing — and an `include` pointing at a
+// file that is not there is the one thing in an smb.conf that makes testparm
+// complain about a change nobody can see.
+func RemoveInclude(existing, line string) (string, error) {
+	if err := checkValue("an include line", line); err != nil {
+		return "", err
+	}
+	lines := splitLines(existing)
+	out := make([]string, 0, len(lines))
+	for _, current := range lines {
+		if strings.EqualFold(strings.TrimSpace(current), line) {
+			continue
+		}
+		out = append(out, current)
+	}
+	if len(out) == len(lines) {
+		return existing, nil
+	}
+	text := strings.Join(out, "\n")
+	if text != "" {
+		text += "\n"
+	}
+	return text, nil
 }
 
 // sectionRe matches a section header, whatever indentation it carries.

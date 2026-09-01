@@ -13,7 +13,10 @@
 //	smbclient    the self-test: the share list as a client sees it
 //	systemctl    whether the units are enabled and running
 //	ss           whether anything is actually listening on 445 and 139
-//	install      writing a staged file to its destination
+//	install      writing a staged file to its destination, and creating the
+//	             directory a new share exports
+//	rm           removing a drop-in this tool wrote, and nothing else
+//	chcon        labelling a new share directory where SELinux is enforcing
 //	getenforce   whether SELinux is enforcing
 //	getsebool    the two booleans that decide whether Samba may export a
 //	             directory at all
@@ -62,6 +65,8 @@ var searchPaths = map[string][]string{
 	"systemctl":   {"/usr/bin/systemctl", "/bin/systemctl"},
 	"ss":          {"/usr/bin/ss", "/bin/ss", "/usr/sbin/ss", "/sbin/ss"},
 	"install":     {"/usr/bin/install", "/bin/install"},
+	"rm":          {"/usr/bin/rm", "/bin/rm"},
+	"chcon":       {"/usr/bin/chcon", "/bin/chcon"},
 	"cat":         {"/usr/bin/cat", "/bin/cat"},
 	"stat":        {"/usr/bin/stat", "/bin/stat"},
 	"ls":          {"/usr/bin/ls", "/bin/ls"},
@@ -109,6 +114,8 @@ type Real struct {
 	systemctl  *runner.Runner
 	ss         *runner.Runner
 	install    *runner.Runner
+	rm         *runner.Runner
+	chcon      *runner.Runner
 	getenforce *runner.Runner
 	getsebool  *runner.Runner
 	// cat, stat and ls are the escalated fallbacks for a path an unprivileged
@@ -161,6 +168,8 @@ func NewReal(sudoPrefix []string, caps compat.Caps, opts Options) (*Real, error)
 		{"systemctl", &real.systemctl, &unprivileged},
 		{"ss", &real.ss, &unprivileged},
 		{"install", &real.install, nil},
+		{"rm", &real.rm, nil},
+		{"chcon", &real.chcon, nil},
 		{"getenforce", &real.getenforce, &unprivileged},
 		{"getsebool", &real.getsebool, &unprivileged},
 		{"cat", &real.cat, nil},
@@ -270,6 +279,10 @@ func (r *Real) runnerFor(cmd shares.Command) *runner.Runner {
 		return r.smbclient
 	case "install":
 		return r.install
+	case "rm":
+		return r.rm
+	case "chcon":
+		return r.chcon
 	default:
 		return nil
 	}
@@ -793,7 +806,10 @@ func (r *Real) planShareWrite(ctx context.Context, model shares.Model,
 	}
 	plan.TempPath = staged
 
-	var commands []shares.Command
+	commands, pathNote, err := r.pathCommands(model, req)
+	if err != nil {
+		return shares.WritePlan{}, err
+	}
 	if !inMain {
 		if _, statErr := os.Stat(DropInDir); statErr != nil {
 			commands = append(commands, BuildMakeDropInDir())
@@ -834,6 +850,314 @@ func (r *Real) planShareWrite(ctx context.Context, model shares.Model,
 		commands = append(commands, BuildReload())
 	}
 	plan.Commands = commands
+	plan.Warning = joinNotes(plan.Warning, pathNote)
+	return plan, nil
+}
+
+// joinNotes puts two caveats in one dialog paragraph, keeping whichever of
+// them there is.
+func joinNotes(notes ...string) string {
+	var kept []string
+	for _, note := range notes {
+		if strings.TrimSpace(note) != "" {
+			kept = append(kept, note)
+		}
+	}
+	return strings.Join(kept, "\n\n")
+}
+
+// pathCommands is the part of a share plan that is not a configuration file:
+// creating the directory the share exports, and labelling it.
+//
+// A share whose path does not exist looks to every client like a permission
+// problem on the server, and it is the commonest way a new share fails. So the
+// directory is offered in the same plan, previewed like everything else — and
+// nothing is created when the path is already there, or when the form said no.
+func (r *Real) pathCommands(model shares.Model,
+	req shares.ShareRequest) ([]shares.Command, string, error) {
+	if !Bool(req.CreatePath, false) {
+		return nil, "", nil
+	}
+	path := strings.TrimSpace(req.Path)
+	if err := CheckPath(path); err != nil {
+		return nil, "", err
+	}
+	switch _, err := os.Stat(path); {
+	case err == nil:
+		// The directory is there: its mode and its owner are somebody's
+		// decision, and a share form is not the place to overrule them.
+		return nil, "", nil
+	case !os.IsNotExist(err):
+		return nil, "the directory could not be looked at (" +
+			runner.FirstLine(err.Error()) + "), so this plan leaves it alone; " +
+			"the share is written either way", nil
+	}
+	if r.install == nil {
+		return nil, "the `install` command was not found, so " + path +
+			" cannot be created here — the share is written and the directory " +
+			"is yours to make", nil
+	}
+
+	owner, group := ownerOrRoot(req.Owner), ownerOrRoot(req.Group)
+	create, err := BuildMakeShareDir(path, owner, group)
+	if err != nil {
+		return nil, "", err
+	}
+	commands := []shares.Command{create}
+	note := path + " does not exist yet, so this plan creates it: mode " +
+		ShareDirMode + ", owned by " + owner + ":" + group + "."
+
+	if r.enforcing(model) && r.chcon != nil {
+		label, labelErr := BuildLabelShareDir(path)
+		if labelErr != nil {
+			return nil, "", labelErr
+		}
+		commands = append(commands, label)
+		note += " SELinux is enforcing here, so it is also labelled " +
+			SELinuxShareType + " — which `chcon` does until the next full " +
+			"relabel of the filesystem, not for ever."
+	}
+	return commands, note, nil
+}
+
+// enforcing reports that SELinux is not merely loaded but refusing, which is
+// the only state where a missing label stops a client rather than logging one
+// line nobody reads.
+func (r *Real) enforcing(model shares.Model) bool {
+	return model.SELinux.Enabled &&
+		strings.EqualFold(strings.TrimSpace(model.SELinux.Mode), "enforcing")
+}
+
+// ownerOrRoot is who a created directory belongs to, defaulting to root when
+// the form left the field empty.
+func ownerOrRoot(name string) string {
+	if trimmed := strings.TrimSpace(name); trimmed != "" {
+		return trimmed
+	}
+	return "root"
+}
+
+// BuildShareDelete stages an smb.conf without the share's `include` line and
+// returns the plan that removes both it and the file it pointed at.
+func (r *Real) BuildShareDelete(ctx context.Context, model shares.Model,
+	name string) (shares.WritePlan, error) {
+	caps := r.Capabilities()
+	if !caps.CanEditShares {
+		return shares.WritePlan{}, fmt.Errorf("%s", caps.EditReason)
+	}
+	if r.rm == nil {
+		return shares.WritePlan{}, fmt.Errorf(
+			"samba: the `rm` command was not found, so the drop-in file cannot " +
+				"be removed here")
+	}
+	if err := CheckShareName(name); err != nil {
+		return shares.WritePlan{}, err
+	}
+
+	configPath := model.Global.ConfigFile
+	if configPath == "" {
+		configPath = r.configPath()
+	}
+	mainRaw, mainErr := r.readFile(ctx, configPath)
+	if mainErr != nil {
+		return shares.WritePlan{}, fmt.Errorf("samba: %s could not be read: %w",
+			configPath, mainErr)
+	}
+	dropIn := DropInFor(name)
+	dropInRaw, _ := r.readFile(ctx, dropIn)
+	if err := checkOwned(name, configPath, mainRaw, dropIn, dropInRaw); err != nil {
+		return shares.WritePlan{}, err
+	}
+
+	include := IncludeLineFor(name)
+	updated, err := RemoveInclude(mainRaw, include)
+	if err != nil {
+		return shares.WritePlan{}, err
+	}
+	staged, err := Stage("smb.conf", updated)
+	if err != nil {
+		return shares.WritePlan{}, err
+	}
+
+	plan := shares.WritePlan{
+		Title:    "Remove the share [" + name + "]",
+		Path:     dropIn,
+		TempPath: staged,
+		Diff:     shares.Diff(configPath, mainRaw, updated) + shares.Diff(dropIn, dropInRaw, ""),
+		Warning:  deleteWarning(name, dropIn, configPath, include),
+	}
+
+	// smb.conf loses the line first, so the server is never told to read a
+	// file that has just stopped existing.
+	mainInstall, err := BuildInstall(staged, configPath)
+	if err != nil {
+		return shares.WritePlan{}, err
+	}
+	remove, err := BuildRemoveDropIn(dropIn)
+	if err != nil {
+		return shares.WritePlan{}, err
+	}
+	plan.Commands = []shares.Command{mainInstall, remove}
+	if r.smbcontrol != nil {
+		plan.Commands = append(plan.Commands, BuildReload())
+	}
+	r.validate(ctx, &plan)
+	return plan, nil
+}
+
+// deleteWarning is what the confirm dialog says a removal does and, more
+// usefully, what it does not.
+func deleteWarning(name, dropIn, configPath, include string) string {
+	return "This removes " + dropIn + " and the line `" + include + "` from " +
+		configPath + ". Nothing else in that file changes.\n\n" +
+		"The directory [" + name + "] exported and everything in it are left " +
+		"exactly as they are: this stops the share being served, it does not " +
+		"delete a single file."
+}
+
+// checkOwned refuses a share this tool did not write, in the words that say
+// which of the several ways that can be true is the one here.
+//
+// A share is this tool's to remove only when it lives alone in a drop-in this
+// tool created and smb.conf reaches it through one `include` line. Anything
+// else — a stanza in the distribution's own file, a file somebody else wrote,
+// an include from somewhere this tool does not manage — is somebody's
+// configuration, and taking a section out of it behind a keystroke is how a
+// file server gets a change nobody can explain afterwards.
+func checkOwned(name, configPath, mainRaw, dropIn, dropInRaw string) error {
+	if hasStanza(mainRaw, name) {
+		return fmt.Errorf(
+			"samba: [%s] is written in %s itself, not in a drop-in tui-samba "+
+				"owns — that file belongs to whoever wrote it, so remove the "+
+				"stanza there by hand", name, configPath)
+	}
+	if dropInRaw == "" {
+		return fmt.Errorf(
+			"samba: [%s] does not come from %s, so it is defined somewhere "+
+				"tui-samba did not write — another `include`, or a file added to "+
+				"the configuration by hand. Only a share this tool created is "+
+				"removed here", name, dropIn)
+	}
+	if !strings.HasPrefix(dropInRaw, Header) {
+		return fmt.Errorf(
+			"samba: %s was not written by tui-samba — it carries no `%s` banner, "+
+				"so it is somebody else's file with the same name", dropIn,
+			strings.TrimSuffix(firstLine(Header), "\n"))
+	}
+	if !hasStanza(dropInRaw, name) {
+		return fmt.Errorf(
+			"samba: %s does not define [%s], so the share is coming from "+
+				"somewhere else and removing this file would not remove it",
+			dropIn, name)
+	}
+	includes := ParseIncludes(mainRaw)
+	for _, current := range includes {
+		if current == dropIn {
+			return nil
+		}
+	}
+	return fmt.Errorf(
+		"samba: %s exists but %s does not include it, so [%s] is reached some "+
+			"other way — removing the file would leave the share where it is",
+		dropIn, configPath, name)
+}
+
+// BuildGlobalWrite stages the server-wide settings into this tool's own
+// drop-in, has Samba's parser read it back, and returns the plan that installs
+// it.
+func (r *Real) BuildGlobalWrite(ctx context.Context, model shares.Model,
+	req shares.GlobalRequest) (shares.WritePlan, error) {
+	caps := r.Capabilities()
+	if !caps.CanEditShares {
+		return shares.WritePlan{}, fmt.Errorf("%s", caps.EditReason)
+	}
+	configPath := model.Global.ConfigFile
+	if configPath == "" {
+		configPath = r.configPath()
+	}
+	mainRaw, mainErr := r.readFile(ctx, configPath)
+	if mainErr != nil {
+		return shares.WritePlan{}, fmt.Errorf("samba: %s could not be read: %w",
+			configPath, mainErr)
+	}
+	before, _ := r.readFile(ctx, GlobalDropIn)
+
+	plan, err := planGlobalWrite(req, configPath, mainRaw, before)
+	if err != nil {
+		return shares.WritePlan{}, err
+	}
+	if !hasDropInDir() {
+		plan.Commands = append([]shares.Command{BuildMakeDropInDir()},
+			plan.Commands...)
+	}
+	if r.smbcontrol != nil {
+		plan.Commands = append(plan.Commands, BuildReload())
+	}
+	r.validate(ctx, &plan)
+	return plan, nil
+}
+
+// hasDropInDir reports whether the drop-in directory is already there, so a
+// plan only carries the command that creates it when it is not.
+func hasDropInDir() bool {
+	_, err := os.Stat(DropInDir)
+	return err == nil
+}
+
+// planGlobalWrite is the whole server-wide change as a function of the files
+// it reads, so the real backend and the sample machine produce the same plan
+// from the same bytes.
+func planGlobalWrite(req shares.GlobalRequest, configPath, mainRaw,
+	before string) (shares.WritePlan, error) {
+	stanza, err := RenderGlobal(req, KeepGlobalLines(rawStanza(before, "global")))
+	if err != nil {
+		return shares.WritePlan{}, err
+	}
+	plan := shares.WritePlan{
+		Title:   "Write the server settings to " + GlobalDropIn,
+		Path:    GlobalDropIn,
+		Content: RenderDropIn(stanza),
+	}
+	plan.Diff = shares.Diff(GlobalDropIn, before, plan.Content)
+
+	staged, err := Stage(filepath.Base(GlobalDropIn), plan.Content)
+	if err != nil {
+		return shares.WritePlan{}, err
+	}
+	plan.TempPath = staged
+
+	install, err := BuildInstall(staged, GlobalDropIn)
+	if err != nil {
+		return shares.WritePlan{}, err
+	}
+	plan.Commands = []shares.Command{install}
+
+	// The include goes at the end of [global], which is exactly what makes
+	// this work: an `include` is processed where it appears, so these three
+	// parameters are read after the ones the main file sets and are the ones
+	// that win.
+	include := "include = " + GlobalDropIn
+	updated, err := AddInclude(mainRaw, include)
+	if err != nil {
+		return shares.WritePlan{}, err
+	}
+	plan.Warning = "These settings are written to a file of tui-samba's own " +
+		"rather than into " + configPath + ", and they are read at the end of " +
+		"[global], so they are the ones that win over anything set above."
+	if updated != mainRaw {
+		mainStaged, stageErr := Stage("smb.conf", updated)
+		if stageErr != nil {
+			return shares.WritePlan{}, stageErr
+		}
+		mainInstall, installErr := BuildInstall(mainStaged, configPath)
+		if installErr != nil {
+			return shares.WritePlan{}, installErr
+		}
+		plan.Commands = append(plan.Commands, mainInstall)
+		plan.Diff += shares.Diff(configPath, mainRaw, updated)
+		plan.Warning += " One line is added to " + configPath + ": `" +
+			include + "`. Nothing else in that file changes."
+	}
 	return plan, nil
 }
 

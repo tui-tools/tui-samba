@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tui-tools/tui-kit/theme"
 	"github.com/tui-tools/tui-kit/ui"
+	"github.com/tui-tools/tui-samba/internal/samba"
 	"github.com/tui-tools/tui-samba/internal/shares"
 )
 
@@ -27,6 +28,25 @@ const (
 	fieldWriteList  = "writelist"
 	fieldCreateMask = "createmask"
 	fieldDirMask    = "dirmask"
+	fieldCreateDir  = "createdir"
+	fieldOwner      = "owner"
+)
+
+// The fields of the server-wide form.
+const (
+	fieldWorkgroup   = "workgroup"
+	fieldMinProtocol = "minprotocol"
+	fieldHostsAllow  = "hostsallow"
+)
+
+// formKind is which of the two things a guided form is. They share their
+// machinery — the fields, the picker, the text box — and differ only in what
+// they collect and what they warn about.
+type formKind int
+
+const (
+	formShare formKind = iota
+	formGlobal
 )
 
 // yesNoOptions is the closed set a boolean field offers, in the order it
@@ -47,28 +67,31 @@ type formField struct {
 // choice reports whether the field is one the picker serves.
 func (f formField) choice() bool { return len(f.options) > 0 && !f.locked }
 
-// shareForm is the guided editor for one share.
+// guidedForm is the guided editor: one share, or the server-wide settings.
 //
-// Ten fields, and no free-text escape hatch for the rest. A share can carry a
-// hundred parameters and this form collects the ten people actually change;
-// every other line the stanza already had is kept exactly as it is, so a share
-// with a `vfs objects` or a `hosts allow` survives an edit here untouched. A
-// form that could set any parameter would be a text editor with extra steps,
-// and a text editor is what `$EDITOR /etc/samba/smb.conf` already is.
-type shareForm struct {
+// A dozen fields, and no free-text escape hatch for the rest. A share can
+// carry a hundred parameters and this form collects the ones people actually
+// change; every other line the stanza already had is kept exactly as it is, so
+// a share with a `vfs objects` or a `hosts allow` survives an edit here
+// untouched. A form that could set any parameter would be a text editor with
+// extra steps, and a text editor is what `$EDITOR /etc/samba/smb.conf` already
+// is.
+type guidedForm struct {
+	// kind is which of the two editors this is.
+	kind   formKind
 	fields []formField
 	values map[string]string
 	active int
 	input  textinput.Model
 	// original is the share being edited, empty when creating one.
 	original string
-	// creating reports which of the two things this form is.
+	// creating reports which of the two things a share form is.
 	creating bool
 }
 
 // newShareForm builds the editor, seeded from the share it is editing.
-func newShareForm(share shares.Share, creating bool) shareForm {
-	f := shareForm{
+func newShareForm(share shares.Share, creating bool) guidedForm {
+	f := guidedForm{
 		creating: creating,
 		values: map[string]string{
 			fieldName:       share.Name,
@@ -90,6 +113,12 @@ func newShareForm(share shares.Share, creating bool) shareForm {
 		f.values[fieldGuest] = "no"
 		f.values[fieldCreateMask] = "0664"
 		f.values[fieldDirMask] = "0775"
+		// The path of a new share is the commonest thing to get wrong, and a
+		// share pointing at nothing looks to every client like a permission
+		// problem. So the offer leads with yes — and it still produces no
+		// command at all when the directory is already there.
+		f.values[fieldCreateDir] = "yes"
+		f.values[fieldOwner] = "root:root"
 	} else {
 		f.original = share.Name
 	}
@@ -128,12 +157,82 @@ func newShareForm(share shares.Share, creating bool) shareForm {
 				"which is what keeps a shared directory's group on everything " +
 				"created in it."},
 	}
+	// Creating the directory is offered only where it can be the right answer:
+	// on a share that does not exist yet. An existing share's path has a mode
+	// and an owner somebody chose, and this form does not overrule them.
+	if creating {
+		f.fields = append(f.fields,
+			formField{key: fieldCreateDir, label: "Create the path",
+				options: yesNoOptions,
+				help: "Create the directory in the same change, when it is not " +
+					"already there. A share whose path is missing looks to every " +
+					"client like a permission problem on the server."},
+			formField{key: fieldOwner, label: "Owner:group",
+				help: "Who a directory this change creates belongs to, as " +
+					"owner:group. It is ignored when the path already exists."})
+	}
 
 	f.input = textinput.New()
 	f.input.CharLimit = 200
 	f.input.Prompt = ""
 	f.focusActive()
 	return f
+}
+
+// newGlobalForm builds the server-wide editor, seeded from the configuration
+// the server itself resolved.
+//
+// Three settings, and deliberately only three: the ones that decide what a
+// client sees in a browse list, which dialects the server will speak at all,
+// and which machines may reach it. Everything else in [global] is either a
+// default nobody should be nudged into changing behind a form, or a decision
+// that belongs in the file the distribution shipped.
+func newGlobalForm(global shares.Global) guidedForm {
+	f := guidedForm{
+		kind: formGlobal,
+		values: map[string]string{
+			fieldWorkgroup:   global.Workgroup,
+			fieldMinProtocol: minProtocolOrDefault(global.MinProtocol),
+			fieldHostsAllow:  global.Params["hosts allow"],
+		},
+		fields: []formField{
+			{key: fieldWorkgroup, label: "Workgroup",
+				help: "The NetBIOS workgroup a Windows client sees this server " +
+					"in. WORKGROUP is the default everywhere, and matching the " +
+					"clients is the whole of what it does."},
+			{key: fieldMinProtocol, label: "Min protocol",
+				options: samba.MinProtocols,
+				help: "The lowest dialect the server will speak. NT1 is SMB1, " +
+					"which is off by default since Samba 4.11 and is the protocol " +
+					"WannaCry travelled on — choose it only for a device that " +
+					"speaks nothing else."},
+			{key: fieldHostsAllow, label: "Hosts allow",
+				help: "Which machines may connect at all, before any password is " +
+					"asked for. Space separated: 192.168.1. for a network, " +
+					"192.168.1.0/24, an address, a name, or .example.com. Empty " +
+					"means everyone who can reach the port."},
+		},
+	}
+	f.input = textinput.New()
+	f.input.CharLimit = 200
+	f.input.Prompt = ""
+	f.focusActive()
+	return f
+}
+
+// defaultMinProtocol is what Samba itself has done since 4.11, and therefore
+// what a server that never set the parameter is really doing.
+const defaultMinProtocol = "SMB2_02"
+
+// minProtocolOrDefault is the dialect the picker opens on: whatever the server
+// resolved, and Samba's own default when that is a value this form does not
+// write — so opening the form and confirming it proposes what is already true
+// rather than a change nobody asked for.
+func minProtocolOrDefault(value string) string {
+	if samba.CheckMinProtocol(value) == nil {
+		return strings.ToUpper(strings.TrimSpace(value))
+	}
+	return defaultMinProtocol
 }
 
 // nameHelp is what the name field says, which is different for the two things
@@ -158,10 +257,10 @@ func yesNo(value bool) string {
 }
 
 // visible are the fields the form is showing, which is all of them.
-func (f shareForm) visible() []formField { return f.fields }
+func (f guidedForm) visible() []formField { return f.fields }
 
 // current is the field being edited.
-func (f shareForm) current() formField {
+func (f guidedForm) current() formField {
 	fields := f.visible()
 	if f.active < 0 || f.active >= len(fields) {
 		return formField{}
@@ -171,7 +270,7 @@ func (f shareForm) current() formField {
 
 // focusActive loads the active field into the text box, or blurs it for a
 // choice or a locked field.
-func (f *shareForm) focusActive() {
+func (f *guidedForm) focusActive() {
 	field := f.current()
 	if field.choice() || field.locked || field.key == "" {
 		f.input.Blur()
@@ -183,7 +282,7 @@ func (f *shareForm) focusActive() {
 }
 
 // save writes the text box back into the values before the field changes.
-func (f *shareForm) save() {
+func (f *guidedForm) save() {
 	field := f.current()
 	if field.key != "" && !field.choice() && !field.locked {
 		f.values[field.key] = f.input.Value()
@@ -191,14 +290,14 @@ func (f *shareForm) save() {
 }
 
 // next moves to the following field.
-func (f *shareForm) next() {
+func (f *guidedForm) next() {
 	f.save()
 	f.active = (f.active + 1) % len(f.visible())
 	f.focusActive()
 }
 
 // prev moves to the previous field.
-func (f *shareForm) prev() {
+func (f *guidedForm) prev() {
 	f.save()
 	count := len(f.visible())
 	f.active = (f.active + count - 1) % count
@@ -206,17 +305,17 @@ func (f *shareForm) prev() {
 }
 
 // activeIsChoice reports whether the active field is one the picker serves.
-func (f shareForm) activeIsChoice() bool { return f.current().choice() }
+func (f guidedForm) activeIsChoice() bool { return f.current().choice() }
 
 // activeKey, activeLabel, activeOptions and activeValue expose the active
 // field to the picker dialog.
-func (f shareForm) activeKey() string       { return f.current().key }
-func (f shareForm) activeLabel() string     { return f.current().label }
-func (f shareForm) activeOptions() []string { return f.current().options }
-func (f shareForm) activeValue() string     { return f.values[f.current().key] }
+func (f guidedForm) activeKey() string       { return f.current().key }
+func (f guidedForm) activeLabel() string     { return f.current().label }
+func (f guidedForm) activeOptions() []string { return f.current().options }
+func (f guidedForm) activeValue() string     { return f.values[f.current().key] }
 
 // set applies a value chosen in the picker to a field.
-func (f *shareForm) set(field, value string) {
+func (f *guidedForm) set(field, value string) {
 	if field == "" {
 		return
 	}
@@ -225,7 +324,7 @@ func (f *shareForm) set(field, value string) {
 }
 
 // cycle moves a choice field one step.
-func (f *shareForm) cycle(delta int) {
+func (f *guidedForm) cycle(delta int) {
 	field := f.current()
 	if !field.choice() {
 		return
@@ -241,7 +340,7 @@ func (f *shareForm) cycle(delta int) {
 }
 
 // updateActive forwards a message to the value field when it is a text box.
-func (f *shareForm) updateActive(msg tea.Msg) tea.Cmd {
+func (f *guidedForm) updateActive(msg tea.Msg) tea.Cmd {
 	if f.current().choice() || f.current().locked {
 		return nil
 	}
@@ -253,8 +352,9 @@ func (f *shareForm) updateActive(msg tea.Msg) tea.Cmd {
 // request is what the form collected, ready for the backend to render into a
 // stanza. Only the collecting lives here: what a name, a path and an access
 // list may be is the backend's rule, checked once, where the file is built.
-func (f *shareForm) request() (shares.ShareRequest, error) {
+func (f *guidedForm) request() (shares.ShareRequest, error) {
 	f.save()
+	owner, group := splitOwner(f.values[fieldOwner])
 	return shares.ShareRequest{
 		Original:      f.original,
 		Name:          strings.TrimSpace(f.values[fieldName]),
@@ -267,13 +367,45 @@ func (f *shareForm) request() (shares.ShareRequest, error) {
 		WriteList:     f.values[fieldWriteList],
 		CreateMask:    strings.TrimSpace(f.values[fieldCreateMask]),
 		DirectoryMask: strings.TrimSpace(f.values[fieldDirMask]),
+		CreatePath:    f.values[fieldCreateDir],
+		Owner:         owner,
+		Group:         group,
 	}, nil
+}
+
+// globalRequest is what the server-wide form collected.
+func (f *guidedForm) globalRequest() shares.GlobalRequest {
+	f.save()
+	return shares.GlobalRequest{
+		Workgroup:   strings.TrimSpace(f.values[fieldWorkgroup]),
+		MinProtocol: strings.TrimSpace(f.values[fieldMinProtocol]),
+		HostsAllow:  strings.TrimSpace(f.values[fieldHostsAllow]),
+	}
+}
+
+// splitOwner reads the `owner:group` field, defaulting the group to the owner
+// the way `chown alice` does and both of them to root when the field is empty.
+func splitOwner(value string) (owner, group string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "root", "root"
+	}
+	owner, group, found := strings.Cut(value, ":")
+	owner = strings.TrimSpace(owner)
+	group = strings.TrimSpace(group)
+	if !found || group == "" {
+		group = owner
+	}
+	return owner, group
 }
 
 // warning is the one line the form keeps under the fields: the combination
 // that turns a file server into a drop box, said as it becomes true rather
 // than after the change is written.
-func (f shareForm) warning() string {
+func (f guidedForm) warning() string {
+	if f.kind == formGlobal {
+		return f.globalWarning()
+	}
 	if f.values[fieldGuest] == "yes" && f.values[fieldReadOnly] == "no" {
 		return "guest ok = yes with read only = no: anybody who can reach " +
 			"this server can write here, with no password"
@@ -287,14 +419,31 @@ func (f shareForm) warning() string {
 	return ""
 }
 
+// globalWarning is what the server-wide form says as a setting becomes one
+// worth thinking about twice.
+func (f guidedForm) globalWarning() string {
+	if samba.IsSMB1(f.values[fieldMinProtocol]) {
+		return "NT1 is SMB1: this server would answer the protocol WannaCry " +
+			"travelled on, which Samba has had off by default since 4.11"
+	}
+	if strings.TrimSpace(f.values[fieldHostsAllow]) == "" {
+		return "an empty hosts allow lets every machine that can reach port 445 " +
+			"try to connect, which is what a server on a flat network is"
+	}
+	return ""
+}
+
 // view renders the form as a dialog.
-func (f shareForm) view(t theme.Theme, width, height int) string {
+func (f guidedForm) view(t theme.Theme, width, height int) string {
 	inner := min(max(width-8, 34), 76)
 	labelWidth := min(14, max(inner-16, 8))
 	valueWidth := max(inner-labelWidth-6, 10)
 
 	title := "Edit the share [" + f.original + "]"
-	if f.creating {
+	switch {
+	case f.kind == formGlobal:
+		title = "The server itself — [global]"
+	case f.creating:
 		title = "Add a share"
 	}
 	lines := []string{t.Title.Render(ui.Truncate(title, inner-2)), ""}

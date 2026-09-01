@@ -385,6 +385,13 @@ func (f *Fake) apply(cmd shares.Command) (string, error) {
 	switch argv[0] {
 	case "install":
 		return f.install(argv)
+	case "rm":
+		return f.remove(argv)
+	case "chcon":
+		// The sample machine has SELinux off, so a label is never asked for
+		// here; the case exists so the demo would apply one coherently if it
+		// were.
+		return "", nil
 	case BinSmbpasswd:
 		return f.passwd(argv)
 	case BinSmbcontrol:
@@ -402,8 +409,12 @@ func (f *Fake) apply(cmd shares.Command) (string, error) {
 // the confirm dialog had checked.
 func (f *Fake) install(argv []string) (string, error) {
 	if len(argv) >= 4 && argv[1] == "-d" {
-		// `install -d` creates the drop-in directory, which the in-memory
-		// machine does not model: a file appearing in it is the whole effect.
+		// `install -d` creates a directory: the drop-in one, which the
+		// in-memory machine does not model because a file appearing in it is
+		// the whole effect, or the one a new share exports, which it does —
+		// the point of the sample machine is that a share whose path was
+		// missing stops being one afterwards.
+		f.makeDir(argv)
 		return "", nil
 	}
 	if len(argv) < 5 {
@@ -415,6 +426,38 @@ func (f *Fake) install(argv []string) (string, error) {
 		return "", err
 	}
 	f.files[destination] = string(body)
+	f.rebuild()
+	return "", nil
+}
+
+// makeDir records a directory `install -d` created on the sample machine,
+// with the ownership and the mode the command carries.
+func (f *Fake) makeDir(argv []string) {
+	path := argv[len(argv)-1]
+	if path == DropInDir {
+		return
+	}
+	info := shares.DirInfo{Path: path, Exists: true, IsDir: true,
+		Mode: ShareDirMode, Owner: "root", Group: "root"}
+	for i := 1; i+1 < len(argv); i++ {
+		switch argv[i] {
+		case "-m":
+			info.Mode = argv[i+1]
+		case "-o":
+			info.Owner = argv[i+1]
+		case "-g":
+			info.Group = argv[i+1]
+		}
+	}
+	f.dirs[path] = info
+	f.rebuild()
+}
+
+// remove deletes a file from the sample machine, which is what makes the demo
+// show a share disappearing rather than merely reporting that it would.
+func (f *Fake) remove(argv []string) (string, error) {
+	path := argv[len(argv)-1]
+	delete(f.files, path)
 	f.rebuild()
 	return "", nil
 }
@@ -552,7 +595,10 @@ func (f *Fake) BuildShareWrite(_ context.Context, model shares.Model,
 	}
 	plan.TempPath = staged
 
-	var commands []shares.Command
+	commands, pathNote, err := f.pathCommands(req)
+	if err != nil {
+		return shares.WritePlan{}, err
+	}
 	install, err := BuildInstall(staged, destination)
 	if err != nil {
 		return shares.WritePlan{}, err
@@ -583,19 +629,125 @@ func (f *Fake) BuildShareWrite(_ context.Context, model shares.Model,
 	}
 	commands = append(commands, BuildReload())
 	plan.Commands = commands
+	plan.Warning = joinNotes(plan.Warning, pathNote)
+	f.checked(&plan, staged)
+	_ = model
+	return plan, nil
+}
 
-	// The sample machine answers the check the way a server with a readable
-	// staged file does, because the file really was staged and really is
-	// readable.
+// pathCommands is the sample machine's answer to a share whose directory is
+// not there, built from the same builders and gated on the same question the
+// real backend asks — here of the in-memory directories rather than of a stat.
+func (f *Fake) pathCommands(req shares.ShareRequest) ([]shares.Command, string,
+	error) {
+	if !Bool(req.CreatePath, false) {
+		return nil, "", nil
+	}
+	path := strings.TrimSpace(req.Path)
+	if err := CheckPath(path); err != nil {
+		return nil, "", err
+	}
+	if info, ok := f.dirs[path]; ok && info.Exists {
+		return nil, "", nil
+	}
+	owner, group := ownerOrRoot(req.Owner), ownerOrRoot(req.Group)
+	create, err := BuildMakeShareDir(path, owner, group)
+	if err != nil {
+		return nil, "", err
+	}
+	commands := []shares.Command{create}
+	note := path + " does not exist yet, so this plan creates it: mode " +
+		ShareDirMode + ", owned by " + owner + ":" + group + "."
+
+	if f.model.SELinux.Enabled &&
+		strings.EqualFold(f.model.SELinux.Mode, "enforcing") {
+		label, labelErr := BuildLabelShareDir(path)
+		if labelErr != nil {
+			return nil, "", labelErr
+		}
+		commands = append(commands, label)
+		note += " SELinux is enforcing here, so it is also labelled " +
+			SELinuxShareType + " — which `chcon` does until the next full " +
+			"relabel of the filesystem, not for ever."
+	}
+	return commands, note, nil
+}
+
+// checked records the answer the sample machine gives to the staged check.
+//
+// It is the answer a server with a readable staged file gives, because the
+// file really was staged and really is readable: the demo runs the same
+// builder and previews the same command line.
+func (f *Fake) checked(plan *shares.WritePlan, staged string) {
 	validate, err := BuildValidate(staged)
 	if err != nil {
-		return shares.WritePlan{}, err
+		plan.Validation = "could not run: " + err.Error()
+		return
 	}
 	plan.ValidationCommand = f.run.Preview(validate)
 	plan.Validated = true
 	plan.Validation = "Samba's own parser read the staged file: " +
 		"Loaded services file OK."
-	_ = model
+}
+
+// BuildShareDelete removes a share from the sample machine, refusing the same
+// ones the real backend refuses and for the same reasons.
+func (f *Fake) BuildShareDelete(_ context.Context, _ shares.Model,
+	name string) (shares.WritePlan, error) {
+	if err := CheckShareName(name); err != nil {
+		return shares.WritePlan{}, err
+	}
+	configPath := "/etc/samba/smb.conf"
+	mainRaw := f.files[configPath]
+	dropIn := DropInFor(name)
+	dropInRaw := f.files[dropIn]
+	if err := checkOwned(name, configPath, mainRaw, dropIn, dropInRaw); err != nil {
+		return shares.WritePlan{}, err
+	}
+
+	include := IncludeLineFor(name)
+	updated, err := RemoveInclude(mainRaw, include)
+	if err != nil {
+		return shares.WritePlan{}, err
+	}
+	staged, err := Stage("smb.conf", updated)
+	if err != nil {
+		return shares.WritePlan{}, err
+	}
+
+	plan := shares.WritePlan{
+		Title:    "Remove the share [" + name + "]",
+		Path:     dropIn,
+		TempPath: staged,
+		Diff: shares.Diff(configPath, mainRaw, updated) +
+			shares.Diff(dropIn, dropInRaw, ""),
+		Warning: deleteWarning(name, dropIn, configPath, include),
+	}
+	mainInstall, err := BuildInstall(staged, configPath)
+	if err != nil {
+		return shares.WritePlan{}, err
+	}
+	remove, err := BuildRemoveDropIn(dropIn)
+	if err != nil {
+		return shares.WritePlan{}, err
+	}
+	plan.Commands = []shares.Command{mainInstall, remove, BuildReload()}
+	f.checked(&plan, staged)
+	return plan, nil
+}
+
+// BuildGlobalWrite renders the same server-wide plan the real backend renders,
+// against the sample machine's own files.
+func (f *Fake) BuildGlobalWrite(_ context.Context, _ shares.Model,
+	req shares.GlobalRequest) (shares.WritePlan, error) {
+	configPath := "/etc/samba/smb.conf"
+	plan, err := planGlobalWrite(req, configPath, f.files[configPath],
+		f.files[GlobalDropIn])
+	if err != nil {
+		return shares.WritePlan{}, err
+	}
+	plan.Commands = append(plan.Commands, BuildReload())
+	f.checked(&plan, plan.TempPath)
 	return plan, nil
 }
 
