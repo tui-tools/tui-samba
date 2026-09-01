@@ -643,7 +643,7 @@ func (a *app) handleBrowseKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.moveCursor(1)
 	case "k", "up":
 		a.moveCursor(-1)
-	case "home":
+	case "g", "home":
 		a.cursor[a.screen], a.offset[a.screen] = 0, 0
 	case "G", "end":
 		a.cursor[a.screen] = max(a.rowCount()-1, 0)
@@ -693,7 +693,7 @@ func (a *app) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "k", "up":
 		a.detailOffset = max(a.detailOffset-1, 0)
 		return a, nil
-	case "home":
+	case "g", "home":
 		a.detailOffset = 0
 		return a, nil
 	case "pgdown", "ctrl+f":
@@ -719,7 +719,7 @@ func (a *app) handleActionKey(msg tea.KeyMsg) tea.Cmd {
 		return a.openShareForm(true)
 	case "X":
 		return a.askDeleteShare()
-	case "g":
+	case "o":
 		return a.openGlobalForm()
 	case "a":
 		return a.openAddUser()

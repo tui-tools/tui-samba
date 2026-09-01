@@ -717,7 +717,7 @@ func (a *app) shortHelpKeys() []ui.KeyHint {
 		hints = append(hints, ui.KeyHint{Key: "R", Desc: "re-read"})
 	case screenServer:
 		hints = append(hints,
-			ui.KeyHint{Key: "g", Desc: "settings"},
+			ui.KeyHint{Key: "o", Desc: "settings"},
 			ui.KeyHint{Key: "r", Desc: "reload"},
 			ui.KeyHint{Key: "t", Desc: "self-test"})
 	default:
@@ -737,7 +737,7 @@ func helpKeys() []ui.KeyHint {
 	return []ui.KeyHint{
 		{Key: "tab / 1-4", Desc: "shares, accounts, connections, server"},
 		{Key: "↑/k, ↓/j", Desc: "move the selection, or scroll the detail screen"},
-		{Key: "home / G", Desc: "first / last row"},
+		{Key: "g / G", Desc: "first / last row"},
 		{Key: "pgup/pgdn", Desc: "scroll a page"},
 		{Key: "enter", Desc: "open the selected row in full"},
 		{Key: "esc", Desc: "leave the detail screen"},
@@ -745,7 +745,7 @@ func helpKeys() []ui.KeyHint {
 		{Key: "e", Desc: "edit the selected share, with a diff to confirm"},
 		{Key: "n", Desc: "add a share, offering to create its directory too"},
 		{Key: "X", Desc: "remove a share tui-samba wrote, name typed back first"},
-		{Key: "g", Desc: "edit the server settings: workgroup, dialects, hosts allow"},
+		{Key: "o", Desc: "edit the server settings: workgroup, dialects, hosts allow"},
 		{Key: "a", Desc: "add a Samba account, password read from stdin"},
 		{Key: "p", Desc: "set the selected account's password"},
 		{Key: "E / D", Desc: "enable / disable the selected account"},

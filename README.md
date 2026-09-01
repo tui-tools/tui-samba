@@ -198,7 +198,7 @@ The sample server holds a real `smb.conf` and a real drop-in, and the demo reads
 them through the same parser the real backend uses — `include` expanded the way
 `testparm` expands it. So an edit made in the demo produces the same diff it
 would produce on your machine, `X` really removes the drop-in and the `include`
-line that reached it, `g` really writes the server settings, and a new share
+line that reached it, `o` really writes the server settings, and a new share
 whose path is missing really gets its directory.
 
 ## A file server, not a domain controller
@@ -373,7 +373,7 @@ no:
 
 ## The server settings
 
-`g` edits three `[global]` parameters through the same staged, checked, diffed
+`o` edits three `[global]` parameters through the same staged, checked, diffed
 path a share takes:
 
 - **workgroup**, validated as the NetBIOS name it is: fifteen characters, letters,
@@ -445,7 +445,7 @@ the units by their real names, the ports, the workgroup, `security`,
 `map to guest`, the dialect window, every `include` line, and the SELinux state
 with the two `samba_export` booleans.
 
-`g` edits the three of those that are worth a form — see
+`o` edits the three of those that are worth a form — see
 [The server settings](#the-server-settings). `r` reloads the configuration. `t` runs `smbclient -L localhost -N` and shows
 what came back — the share list an **anonymous client on the network** is given,
 which is a different question from what the configuration says: a share that is
@@ -545,7 +545,7 @@ Every one of these is previewed and confirmed first.
 | --- | --- |
 | `e` / `n` | `install -d -m 2775 -o <owner> -g <group> <path>` and `chcon -t samba_share_t <path>` (a new share whose path is missing, on an enforcing SELinux), `install -d -m 755 /etc/samba/tui-samba.d` (when missing), then `install -m 644 <staged> <destination>`, then `smbcontrol all reload-config` |
 | `X` | `install -m 644 <staged> /etc/samba/smb.conf`, then `rm -f -- /etc/samba/tui-samba.d/<name>.conf`, then `smbcontrol all reload-config` |
-| `g` | the same as `n`, into `/etc/samba/tui-samba.d/tui-samba-global.conf` |
+| `o` | the same as `n`, into `/etc/samba/tui-samba.d/tui-samba-global.conf` |
 | `a` | `smbpasswd -a -s <name>`, password on standard input |
 | `p` | `smbpasswd -s <name>`, the same way |
 | `E` / `D` | `smbpasswd -e <name>` / `smbpasswd -d <name>` |
@@ -574,7 +574,7 @@ deleted, and that is checked in the same place.
 | `e` | Edit the selected share, checked and diffed first |
 | `n` | Add a share, offering to create its directory too |
 | `X` | Remove a share this tool wrote, name typed back first |
-| `g` | Edit the server settings: workgroup, minimum protocol, `hosts allow` |
+| `o` | Edit the server settings: workgroup, minimum protocol, `hosts allow` |
 | `a` | Add a Samba account |
 | `p` | Set the selected account's password |
 | `E` / `D` | Enable / disable the selected account |
@@ -584,9 +584,6 @@ deleted, and that is checked in the same place.
 | `R` | Re-read this machine |
 | `?` | Help |
 | `q` | Quit |
-
-`g` used to mean "first row" and now opens the server settings; `home` is the
-first row, and `G` is still the last one.
 
 In the **editor**: `tab` moves between fields, `←`/`→` cycles a choice, `space`
 opens the list, `enter` stages the file and has Samba read it back, `esc`
@@ -628,7 +625,7 @@ cancels. Both editors — a share and the server — are the same form.
   join, no DNS, no group policy, no trusts.
 - **No share is ever renamed**, and only a share this tool wrote can be removed.
   `[homes]`, `[printers]` and `[print$]` are shown and never rewritten;
-  `[global]` is never rewritten either — the three settings `g` collects go to a
+  `[global]` is never rewritten either — the three settings `o` collects go to a
   drop-in of the tool's own.
 - **No share directory is ever deleted**, and no file in one. Removing a share
   removes its definition and nothing on the disk it exported.

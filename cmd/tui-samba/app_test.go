@@ -833,14 +833,37 @@ func TestRemovingRefusesSambaSOwnSections(t *testing.T) {
 	}
 }
 
+// TestGStaysTheFirstRowKey guards a navigation key the whole family shares.
+// The server settings live on "o" precisely so that "g" can keep meaning what
+// it means in vim and in every other tui-tools tool: jump to the first row.
+func TestGStaysTheFirstRowKey(t *testing.T) {
+	a, _ := newTestApp(t)
+	gotoScreen(t, a, screenShares)
+	if a.rowCount() < 2 {
+		t.Fatalf("the sample machine needs at least two shares to move between")
+	}
+	drain(t, a, press(a, "j"))
+	if a.cursor[a.screen] == 0 {
+		t.Fatalf("the cursor did not leave the first row")
+	}
+	drain(t, a, press(a, "g"))
+	if a.mode != modeBrowse {
+		t.Fatalf("g opened %v instead of moving the cursor", a.mode)
+	}
+	if a.cursor[a.screen] != 0 || a.offset[a.screen] != 0 {
+		t.Errorf("g left the cursor at %d (offset %d), want the first row",
+			a.cursor[a.screen], a.offset[a.screen])
+	}
+}
+
 // TestEditingTheServerSettingsIsStagedCheckedAndDiffed: the same path a share
 // edit takes, on the three [global] parameters the form collects.
 func TestEditingTheServerSettingsIsStagedCheckedAndDiffed(t *testing.T) {
 	a, backend := newTestApp(t)
 	gotoScreen(t, a, screenServer)
-	drain(t, a, press(a, "g"))
+	drain(t, a, press(a, "o"))
 	if a.mode != modeForm || a.form.kind != formGlobal {
-		t.Fatalf("g did not open the server editor (status: %s)", a.status)
+		t.Fatalf("o did not open the server editor (status: %s)", a.status)
 	}
 	// It opens on what the server actually resolved, not on a blank form.
 	if a.form.values[fieldWorkgroup] != "WORKGROUP" ||
@@ -908,7 +931,7 @@ func TestEditingTheServerSettingsIsStagedCheckedAndDiffed(t *testing.T) {
 func TestTheServerFormWarnsAboutSMB1(t *testing.T) {
 	a, _ := newTestApp(t)
 	gotoScreen(t, a, screenServer)
-	drain(t, a, press(a, "g"))
+	drain(t, a, press(a, "o"))
 	a.form.values[fieldMinProtocol] = "NT1"
 	if warning := a.form.warning(); !strings.Contains(warning, "SMB1") {
 		t.Errorf("warning = %q", warning)
@@ -918,7 +941,7 @@ func TestTheServerFormWarnsAboutSMB1(t *testing.T) {
 func TestTheServerFormRefusesAWorkgroupThatWouldReachTheFile(t *testing.T) {
 	a, backend := newTestApp(t)
 	gotoScreen(t, a, screenServer)
-	drain(t, a, press(a, "g"))
+	drain(t, a, press(a, "o"))
 	setField(&a.form, fieldWorkgroup, "OFFICE\n\tsecurity = share")
 	drain(t, a, press(a, "enter"))
 

@@ -62,7 +62,7 @@
       "action": "Remove a share tui-samba wrote, after its name has been typed back"
     },
     {
-      "key": "g",
+      "key": "o",
       "action": "Edit the server settings: workgroup, minimum protocol, hosts allow"
     },
     {
