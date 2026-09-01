@@ -3,7 +3,7 @@
   "name": "tui-samba",
   "binary": "tui-samba",
   "tagline": "Samba shares, accounts and live connections, with every change previewed",
-  "description": "A terminal UI for a Samba file server: the shares it exports, the accounts that can reach them, and who is connected right now.\n\nThe shares are listed worst first. A path that does not exist, a directory somebody left at mode 0777, a writable share open to guests — each one is a sentence on the row rather than something to work out from `testparm` output and a `stat`. The configuration comes from `testparm -s`, which is what the server resolved rather than what anybody typed, and every share carries the Unix permissions, the owner and the SELinux label of the directory behind it.\n\nA change goes through Samba's own parser before it goes anywhere near /etc. A share is edited in a guided form, staged to a file, read back with `testparm -s` and shown as a diff — and only then confirmed. It is installed with `install -m 644` and picked up with `smbcontrol all reload-config`, which disconnects nobody.\n\nThis is a file server tool. Samba as an Active Directory domain controller is deliberately out of scope.\n\nRun `tui-samba --demo` to drive a sample server: every key works, every command is built and previewed for real, and nothing touches your system.",
+  "description": "A terminal UI for a Samba file server: the shares it exports, the accounts that can reach them, and who is connected right now.\n\nThe shares are listed worst first. A path that does not exist, a directory somebody left at mode 0777, a writable share open to guests — each one is a sentence on the row rather than something to work out from `testparm` and a `stat`. The configuration comes from `testparm -s` — what the server resolved rather than what anybody typed — and every share carries the mode, the owner and the SELinux label of the directory behind it.\n\nA change goes through Samba's own parser before it goes anywhere near /etc. A share is edited in a guided form, staged, read back with `testparm -s` and shown as a diff — and only then confirmed. It is installed with `install -m 644` and picked up with a reload that disconnects nobody. Removing a share takes away the drop-in and the one `include` line that reached it, never the directory it exported.\n\nSamba as an Active Directory domain controller is deliberately out of scope.\n\nRun `tui-samba --demo` to drive a sample server: every key works, every command is built and previewed for real, and nothing touches your system.",
   "category": "file-sharing",
   "homepage": "https://github.com/tui-tools/tui-samba",
   "repo": "https://github.com/tui-tools/tui-samba",
@@ -55,7 +55,15 @@
     },
     {
       "key": "n",
-      "action": "Add a share, written to a drop-in of its own"
+      "action": "Add a share to a drop-in of its own, offering to create its directory"
+    },
+    {
+      "key": "X",
+      "action": "Remove a share tui-samba wrote, after its name has been typed back"
+    },
+    {
+      "key": "o",
+      "action": "Edit the server settings: workgroup, minimum protocol, hosts allow"
     },
     {
       "key": "a",
@@ -203,7 +211,7 @@
     }
   },
   "security": {
-    "needs_sudo": "Reading the configuration usually needs nothing: smb.conf is world-readable. The password database and `smbstatus` are root-only, and every change escalates through `sudo -n`, which never prompts: writing a share, reloading the server, and every smbpasswd call.",
+    "needs_sudo": "Reading the configuration usually needs nothing: smb.conf is world-readable. The password database and `smbstatus` are root-only, and every change escalates through `sudo -n`, which never prompts: writing or removing a share, creating its directory, reloading, and every smbpasswd call.",
     "preview_before_run": true,
     "no_daemon": true,
     "no_network": false,

@@ -197,7 +197,9 @@ command is built and previewed for real, and nothing touches your system.
 The sample server holds a real `smb.conf` and a real drop-in, and the demo reads
 them through the same parser the real backend uses — `include` expanded the way
 `testparm` expands it. So an edit made in the demo produces the same diff it
-would produce on your machine.
+would produce on your machine, `X` really removes the drop-in and the `include`
+line that reached it, `o` really writes the server settings, and a new share
+whose path is missing really gets its directory.
 
 ## A file server, not a domain controller
 
@@ -311,12 +313,87 @@ and the dialog says so. Samba's `include` is a literal textual inclusion
 processed where it appears — there is no include-a-directory form, and inventing
 one would be inventing a Samba feature.
 
-A share is **never renamed** and never deleted. A rename is really a create and a
-delete, and deleting a share is not something to do behind a form field somebody
-tabbed through.
+A share is **never renamed**. A rename is really a create and a delete, and the
+two halves land in different files — so create the new one and remove the old one
+deliberately, which is two changes and looks like two changes.
 
 The parameters the form does not ask about are **kept exactly as they were**. A
 share with a `vfs objects` or a `hosts allow` survives an edit here untouched.
+
+### Creating the directory too
+
+A share whose path does not exist looks to every client like a permission problem
+on the server, and it is the commonest way a new share fails. So `n` offers the
+directory in the **same plan**, previewed with everything else:
+
+```
+install -d -m 2775 -o root -g staff /srv/photos
+chcon -t samba_share_t /srv/photos            # only where SELinux is enforcing
+```
+
+`install -d` rather than `mkdir` for the reason the file install uses it: the
+mode and the ownership are set in the same call. `2775` because the setgid bit is
+what keeps a shared directory's group on everything created in it. The `chcon` is
+built **only** when the SELinux probe found a policy and `getenforce` said
+`Enforcing` — and it is a `chcon`, so it holds until the next full relabel of the
+filesystem, not for ever.
+
+A path that **already exists is never touched**: its mode and its owner are
+somebody's decision, and a share form does not overrule them. Answering `no` to
+`Create the path` builds no directory command at all.
+
+## Removing a share
+
+`X` removes a share, and only one this tool wrote. It asks for the name to be
+**typed back** first — a removal is the one change here that cannot be undone by
+making the opposite change, because the file is gone and with it every parameter
+of the share the form never asked about.
+
+```
+install -m 644 /tmp/tui-samba-xxxx/smb.conf /etc/samba/smb.conf
+rm -f -- /etc/samba/tui-samba.d/photos.conf
+smbcontrol all reload-config
+```
+
+`smb.conf` loses the `include` line **first**, so the server is never told to read
+a file that has just stopped existing. **The exported directory and everything in
+it are left exactly as they are**: this stops the share being served, it does not
+delete a single file.
+
+Every other share is refused, with the reason it is refused rather than a flat
+no:
+
+| Where the share is | What `X` says |
+| --- | --- |
+| written in `smb.conf` itself | that file belongs to whoever wrote it — remove the stanza there by hand |
+| in no drop-in of this tool's | it is defined somewhere tui-samba did not write: another `include`, or a file added by hand |
+| in a file of the same name without the banner | it is somebody else's file that happens to be named like ours |
+| in our file, but reached some other way | removing the file would not remove the share |
+| `[homes]`, `[printers]`, `[print$]`, `[global]` | one of Samba's own sections, shown and never rewritten |
+
+## The server settings
+
+`o` edits three `[global]` parameters through the same staged, checked, diffed
+path a share takes:
+
+- **workgroup**, validated as the NetBIOS name it is: fifteen characters, letters,
+  digits, dash and underscore;
+- **`server min protocol`**, from a closed list — `SMB3_11`, `SMB3_02`, `SMB3_00`,
+  `SMB2_10`, `SMB2_02`, `NT1` — strictest first. `NT1` is SMB1, and the form says
+  so as it is chosen;
+- **`hosts allow`**, a list of addresses (`192.168.1.5`), networks (`192.168.1.`,
+  `192.168.1.0/24`), names or domain suffixes (`.example.com`). Empty means
+  everyone who can reach port 445, and the form says that too.
+
+They go to **`/etc/samba/tui-samba.d/tui-samba-global.conf`**, reached by the same
+one-line `include` a share drop-in is reached by. Because an `include` is
+processed where it appears and this one lands at the end of `[global]`, these
+three are read **after** whatever the main file set — so they are the ones that
+win, and the dialog says so. The distribution's own `smb.conf` keeps every line
+it had.
+
+`tui-samba-global` is therefore a reserved name: a share cannot be called it,
+because a share of that name would be written over the server's settings.
 
 ## Accounts
 
@@ -368,7 +445,8 @@ the units by their real names, the ports, the workgroup, `security`,
 `map to guest`, the dialect window, every `include` line, and the SELinux state
 with the two `samba_export` booleans.
 
-`r` reloads the configuration. `t` runs `smbclient -L localhost -N` and shows
+`o` edits the three of those that are worth a form — see
+[The server settings](#the-server-settings). `r` reloads the configuration. `t` runs `smbclient -L localhost -N` and shows
 what came back — the share list an **anonymous client on the network** is given,
 which is a different question from what the configuration says: a share that is
 not browseable is real and will not be in it.
@@ -465,7 +543,9 @@ Every one of these is previewed and confirmed first.
 
 | Key | What runs |
 | --- | --- |
-| `e` / `n` | `install -d -m 755 /etc/samba/tui-samba.d` (when missing), then `install -m 644 <staged> <destination>`, then `smbcontrol all reload-config` |
+| `e` / `n` | `install -d -m 2775 -o <owner> -g <group> <path>` and `chcon -t samba_share_t <path>` (a new share whose path is missing, on an enforcing SELinux), `install -d -m 755 /etc/samba/tui-samba.d` (when missing), then `install -m 644 <staged> <destination>`, then `smbcontrol all reload-config` |
+| `X` | `install -m 644 <staged> /etc/samba/smb.conf`, then `rm -f -- /etc/samba/tui-samba.d/<name>.conf`, then `smbcontrol all reload-config` |
+| `o` | the same as `n`, into `/etc/samba/tui-samba.d/tui-samba-global.conf` |
 | `a` | `smbpasswd -a -s <name>`, password on standard input |
 | `p` | `smbpasswd -s <name>`, the same way |
 | `E` / `D` | `smbpasswd -e <name>` / `smbpasswd -d <name>` |
@@ -476,7 +556,9 @@ Every one of these is previewed and confirmed first.
 Nothing else. There is no other code path that writes a file, and the only two
 files ever written are `/etc/samba/smb.conf` and a `.conf` under
 `/etc/samba/tui-samba.d` — both checked at the point the command is built, so
-nothing that reaches an argv can widen that.
+nothing that reaches an argv can widen that. The only file ever **removed** is a
+`.conf` under `/etc/samba/tui-samba.d`; `smb.conf` is rewritten and never
+deleted, and that is checked in the same place.
 
 ## Keys
 
@@ -484,13 +566,15 @@ nothing that reaches an argv can widen that.
 | --- | --- |
 | `tab` / `1`–`4` | Move between shares, accounts, connections and the server |
 | `↑`/`k`, `↓`/`j` | Move the selection, or scroll the detail screen |
-| `g` / `G` | First / last row |
+| `home` / `G` | First / last row |
 | `pgup` / `pgdn` | Scroll a page |
 | `enter` | Open the selected row in full |
 | `esc` | Leave the detail screen |
 | `/` | Filter this screen (`esc` clears) |
 | `e` | Edit the selected share, checked and diffed first |
-| `n` | Add a share |
+| `n` | Add a share, offering to create its directory too |
+| `X` | Remove a share this tool wrote, name typed back first |
+| `o` | Edit the server settings: workgroup, minimum protocol, `hosts allow` |
 | `a` | Add a Samba account |
 | `p` | Set the selected account's password |
 | `E` / `D` | Enable / disable the selected account |
@@ -503,7 +587,7 @@ nothing that reaches an argv can widen that.
 
 In the **editor**: `tab` moves between fields, `←`/`→` cycles a choice, `space`
 opens the list, `enter` stages the file and has Samba read it back, `esc`
-cancels.
+cancels. Both editors — a share and the server — are the same form.
 
 ![Help](docs/screenshots/tui-samba-help.png)
 
@@ -524,7 +608,12 @@ cancels.
 - Report the units by their real names, whether they are enabled and running, and
   what is listening on 445 and 139.
 - Edit or add a share through a guided form, staged, checked by `testparm` and
-  shown as a diff before anything is written.
+  shown as a diff before anything is written — creating the exported directory,
+  and labelling it for SELinux, in the same plan when it is not there.
+- Remove a share this tool wrote: its drop-in and the one `include` line that
+  reached it, after the name has been typed back, and never the directory.
+- Edit the workgroup, the minimum protocol and `hosts allow` into a drop-in of
+  the tool's own, through the same staged and diffed path.
 - Add, remove, enable, disable an account and set its password, with the password
   never in a command line.
 - Reload the running server, and ask it what an anonymous client sees.
@@ -534,8 +623,12 @@ cancels.
 
 - **No Active Directory.** No domain controller, no `samba-tool`, no domain
   join, no DNS, no group policy, no trusts.
-- **No share is ever deleted or renamed**, and `[global]`, `[homes]`,
-  `[printers]` and `[print$]` are shown and never rewritten.
+- **No share is ever renamed**, and only a share this tool wrote can be removed.
+  `[homes]`, `[printers]` and `[print$]` are shown and never rewritten;
+  `[global]` is never rewritten either — the three settings `o` collects go to a
+  drop-in of the tool's own.
+- **No share directory is ever deleted**, and no file in one. Removing a share
+  removes its definition and nothing on the disk it exported.
 - **No session is ever closed.** `smbcontrol <pid> close-share` exists and is
   deliberately not offered: a client disconnected mid-write loses the write.
 - **The service is never started, stopped or restarted.** `smbd` is asked its
@@ -625,10 +718,10 @@ Session{PID, User, Machine, Protocol, Encryption, Signing}
 ```
 
 `internal/samba` is the only package that starts a process, and it starts one for
-twelve programs — `smbd`, `testparm`, `pdbedit`, `smbpasswd`, `smbstatus`,
-`smbcontrol`, `smbclient`, `systemctl`, `ss`, `install`, `getenforce` and
-`getsebool` — plus `cat`, `stat` and `ls` as the escalated fallbacks for a file
-or a directory an ordinary user cannot open.
+fourteen programs — `smbd`, `testparm`, `pdbedit`, `smbpasswd`, `smbstatus`,
+`smbcontrol`, `smbclient`, `systemctl`, `ss`, `install`, `rm`, `chcon`,
+`getenforce` and `getsebool` — plus `cat`, `stat` and `ls` as the escalated
+fallbacks for a file or a directory an ordinary user cannot open.
 [`check-exec.sh`](https://github.com/tui-tools/tui-kit/blob/main/tools/check-exec.sh)
 fails the build if any other package imports `os/exec`.
 
@@ -663,6 +756,11 @@ widgets, the config loader and the command runner shared by the whole family.
   share stops writes over SMB; it does nothing about anybody with a shell.
 - **Removing a Samba account does not remove the Unix account**, and disabling
   one keeps its password. Disabling is what to do when somebody may come back.
+- **Removing a share does not remove its directory**, and nothing here ever
+  deletes a file a client put there.
+- **`chcon` is not permanent.** The label a new share directory is given holds
+  until the filesystem is relabelled; `semanage fcontext` is what makes it
+  survive that, and it is deliberately not run from here.
 - **A reload is not a restart.** Connected clients stay connected, and a client
   already inside a share keeps the access it was granted until it reconnects —
   so tightening a share does not take effect for the people who are in it.

@@ -70,7 +70,7 @@ func typeIn(t *testing.T, a *app, text string) {
 
 // setField fills one form field the way typing into it would, so the value
 // survives the save the next keystroke performs.
-func setField(f *shareForm, key, value string) {
+func setField(f *guidedForm, key, value string) {
 	f.values[key] = value
 	f.focusActive()
 }
@@ -701,5 +701,350 @@ func TestBusyStateSwallowsInput(t *testing.T) {
 	drain(t, a, press(a, "r"))
 	if a.mode != modeBrowse || len(backend.Ran()) != 0 {
 		t.Errorf("a key pressed while a command runs must be ignored")
+	}
+}
+
+// TestRemovingAShareTypesItsNameBackFirst covers the whole removal path: the
+// deliberate step, the exact commands, and the share really going away.
+func TestRemovingAShareTypesItsNameBackFirst(t *testing.T) {
+	a, backend := newTestApp(t)
+	selectShare(t, a, "team")
+	drain(t, a, press(a, "X"))
+	if a.mode != modeInput || a.promptFor != promptDeleteShare {
+		t.Fatalf("X did not ask for the name (status: %s)", a.status)
+	}
+
+	typeIn(t, a, "team")
+	drain(t, a, press(a, "enter"))
+	if a.mode != modeConfirm {
+		t.Fatalf("the name did not reach a confirm dialog (status: %s)", a.status)
+	}
+	if !a.confirm.Danger {
+		t.Errorf("removing a share must be painted as dangerous")
+	}
+
+	// The three commands, in the order that never leaves smb.conf pointing at
+	// a file that is gone.
+	want := []string{
+		"sudo -n install -m 644 ",
+		"sudo -n rm -f -- /etc/samba/tui-samba.d/team.conf",
+		"sudo -n smbcontrol all reload-config",
+	}
+	lines := strings.Split(a.confirm.Command, "\n$ ")
+	if len(lines) != len(want) {
+		t.Fatalf("previewed %d commands, want %d:\n%s", len(lines), len(want),
+			a.confirm.Command)
+	}
+	for i, prefix := range want {
+		if !strings.HasPrefix(lines[i], prefix) {
+			t.Errorf("command %d is %q, want it to start with %q", i, lines[i],
+				prefix)
+		}
+	}
+	if !strings.Contains(lines[0], "/etc/samba/smb.conf") {
+		t.Errorf("the include line is not removed from smb.conf: %q", lines[0])
+	}
+	// And the dialog says what a removal does not do.
+	if !strings.Contains(a.confirm.Body, "it does not delete a single file") {
+		t.Errorf("the dialog does not say the directory survives:\n%s",
+			a.confirm.Body)
+	}
+	if !strings.Contains(a.confirm.Body, "-\tinclude = ") {
+		t.Errorf("the diff does not show the include line going:\n%s",
+			a.confirm.Body)
+	}
+
+	drain(t, a, press(a, "y"))
+	ran := backend.Ran()
+	if len(ran) != len(want) {
+		t.Fatalf("ran %d commands, previewed %d", len(ran), len(want))
+	}
+	for i, cmd := range ran {
+		if got := backend.Preview(cmd); got != lines[i] {
+			t.Errorf("command %d ran %q, want the previewed %q", i, got, lines[i])
+		}
+	}
+	if _, ok := a.model.Share("team"); ok {
+		t.Errorf("the share is still in the inventory")
+	}
+	for _, include := range a.model.Global.Includes {
+		if strings.Contains(include, "team.conf") {
+			t.Errorf("smb.conf still includes the removed drop-in: %v",
+				a.model.Global.Includes)
+		}
+	}
+}
+
+// TestTypingTheWrongNameRemovesNothing: the typed step is the whole point of
+// the typed step.
+func TestTypingTheWrongNameRemovesNothing(t *testing.T) {
+	a, backend := newTestApp(t)
+	selectShare(t, a, "team")
+	drain(t, a, press(a, "X"))
+	typeIn(t, a, "teamm")
+	drain(t, a, press(a, "enter"))
+
+	if a.mode == modeConfirm {
+		t.Errorf("a mistyped name reached a confirm dialog")
+	}
+	if len(backend.Ran()) != 0 {
+		t.Errorf("a command ran anyway")
+	}
+	if !strings.Contains(a.status, "nothing was removed") {
+		t.Errorf("status = %q", a.status)
+	}
+}
+
+// TestRemovingRefusesAShareThisToolDoesNotOwn: [public] is written in the
+// sample machine's own smb.conf, so removing it would mean editing a file
+// somebody else wrote.
+func TestRemovingRefusesAShareThisToolDoesNotOwn(t *testing.T) {
+	a, backend := newTestApp(t)
+	selectShare(t, a, "public")
+	drain(t, a, press(a, "X"))
+	typeIn(t, a, "public")
+	drain(t, a, press(a, "enter"))
+
+	if a.mode == modeConfirm {
+		t.Fatalf("a share defined in smb.conf reached a confirm dialog")
+	}
+	if !strings.Contains(a.status, "is written in /etc/samba/smb.conf itself") {
+		t.Errorf("status = %q, want the specific reason", a.status)
+	}
+	if len(backend.Ran()) != 0 {
+		t.Errorf("a command ran anyway")
+	}
+	if _, ok := a.model.Share("public"); !ok {
+		t.Errorf("[public] left the inventory")
+	}
+}
+
+// TestRemovingRefusesSambaSOwnSections: [homes] is not a directory export, and
+// it is not this tool's to take away.
+func TestRemovingRefusesSambaSOwnSections(t *testing.T) {
+	a, _ := newTestApp(t)
+	selectShare(t, a, "homes")
+	drain(t, a, press(a, "X"))
+	if a.mode == modeInput {
+		t.Errorf("the removal prompt opened on [homes]")
+	}
+	if !strings.Contains(a.status, "Samba's own sections") {
+		t.Errorf("status = %q", a.status)
+	}
+}
+
+// TestGStaysTheFirstRowKey guards a navigation key the whole family shares.
+// The server settings live on "o" precisely so that "g" can keep meaning what
+// it means in vim and in every other tui-tools tool: jump to the first row.
+func TestGStaysTheFirstRowKey(t *testing.T) {
+	a, _ := newTestApp(t)
+	gotoScreen(t, a, screenShares)
+	if a.rowCount() < 2 {
+		t.Fatalf("the sample machine needs at least two shares to move between")
+	}
+	drain(t, a, press(a, "j"))
+	if a.cursor[a.screen] == 0 {
+		t.Fatalf("the cursor did not leave the first row")
+	}
+	drain(t, a, press(a, "g"))
+	if a.mode != modeBrowse {
+		t.Fatalf("g opened %v instead of moving the cursor", a.mode)
+	}
+	if a.cursor[a.screen] != 0 || a.offset[a.screen] != 0 {
+		t.Errorf("g left the cursor at %d (offset %d), want the first row",
+			a.cursor[a.screen], a.offset[a.screen])
+	}
+}
+
+// TestEditingTheServerSettingsIsStagedCheckedAndDiffed: the same path a share
+// edit takes, on the three [global] parameters the form collects.
+func TestEditingTheServerSettingsIsStagedCheckedAndDiffed(t *testing.T) {
+	a, backend := newTestApp(t)
+	gotoScreen(t, a, screenServer)
+	drain(t, a, press(a, "o"))
+	if a.mode != modeForm || a.form.kind != formGlobal {
+		t.Fatalf("o did not open the server editor (status: %s)", a.status)
+	}
+	// It opens on what the server actually resolved, not on a blank form.
+	if a.form.values[fieldWorkgroup] != "WORKGROUP" ||
+		a.form.values[fieldMinProtocol] != "SMB2_02" {
+		t.Errorf("the form was not seeded from the server: %v", a.form.values)
+	}
+
+	setField(&a.form, fieldWorkgroup, "OFFICE")
+	setField(&a.form, fieldMinProtocol, "SMB3_11")
+	setField(&a.form, fieldHostsAllow, "192.168.1. 127.")
+	drain(t, a, press(a, "enter"))
+	if a.mode != modeConfirm {
+		t.Fatalf("the form did not reach a confirm dialog (status: %s)", a.status)
+	}
+
+	if !strings.Contains(a.confirm.Body, "Samba's own parser") {
+		t.Errorf("the dialog does not say the file was checked:\n%s", a.confirm.Body)
+	}
+	for _, want := range []string{
+		"+\tworkgroup = OFFICE",
+		"+\tserver min protocol = SMB3_11",
+		"+\thosts allow = 192.168.1. 127.",
+	} {
+		if !strings.Contains(a.confirm.Body, want) {
+			t.Errorf("the diff is missing %q:\n%s", want, a.confirm.Body)
+		}
+	}
+	if !strings.Contains(a.confirm.Command,
+		"/etc/samba/tui-samba.d/tui-samba-global.conf") {
+		t.Errorf("the settings were not written to the tool's own file: %q",
+			a.confirm.Command)
+	}
+	if !strings.Contains(a.confirm.Command, "/etc/samba/smb.conf") {
+		t.Errorf("the include line was not added to smb.conf: %q",
+			a.confirm.Command)
+	}
+	if !strings.Contains(a.confirm.Body, "the ones that win") {
+		t.Errorf("the dialog does not explain which settings win:\n%s",
+			a.confirm.Body)
+	}
+
+	lines := strings.Split(a.confirm.Command, "\n$ ")
+	drain(t, a, press(a, "y"))
+	if len(backend.Ran()) != len(lines) {
+		t.Fatalf("ran %d commands, previewed %d", len(backend.Ran()), len(lines))
+	}
+	// The sample machine now answers with them, through the same parser a real
+	// one would.
+	if a.model.Global.Workgroup != "OFFICE" {
+		t.Errorf("the workgroup did not reach the sample server: %q",
+			a.model.Global.Workgroup)
+	}
+	if a.model.Global.MinProtocol != "SMB3_11" {
+		t.Errorf("the minimum protocol did not reach the sample server: %q",
+			a.model.Global.MinProtocol)
+	}
+	if a.model.Global.Params["hosts allow"] != "192.168.1. 127." {
+		t.Errorf("the host list did not reach the sample server: %q",
+			a.model.Global.Params["hosts allow"])
+	}
+}
+
+// TestTheServerFormWarnsAboutSMB1: NT1 is the one choice in that picker that
+// makes the server worse, and it is said as it is chosen.
+func TestTheServerFormWarnsAboutSMB1(t *testing.T) {
+	a, _ := newTestApp(t)
+	gotoScreen(t, a, screenServer)
+	drain(t, a, press(a, "o"))
+	a.form.values[fieldMinProtocol] = "NT1"
+	if warning := a.form.warning(); !strings.Contains(warning, "SMB1") {
+		t.Errorf("warning = %q", warning)
+	}
+}
+
+func TestTheServerFormRefusesAWorkgroupThatWouldReachTheFile(t *testing.T) {
+	a, backend := newTestApp(t)
+	gotoScreen(t, a, screenServer)
+	drain(t, a, press(a, "o"))
+	setField(&a.form, fieldWorkgroup, "OFFICE\n\tsecurity = share")
+	drain(t, a, press(a, "enter"))
+
+	if a.mode == modeConfirm {
+		t.Errorf("the form accepted a workgroup carrying a second parameter")
+	}
+	if len(backend.Ran()) != 0 {
+		t.Errorf("a command ran anyway")
+	}
+}
+
+// TestANewSharesDirectoryIsCreatedInTheSamePlan: a share whose path does not
+// exist looks to every client like a permission problem, so the directory is
+// offered in the change that creates the share rather than left as homework.
+func TestANewSharesDirectoryIsCreatedInTheSamePlan(t *testing.T) {
+	a, backend := newTestApp(t)
+	drain(t, a, press(a, "n"))
+	setField(&a.form, fieldName, "photos")
+	setField(&a.form, fieldPath, "/srv/photos")
+	setField(&a.form, fieldOwner, "root:staff")
+	drain(t, a, press(a, "enter"))
+	if a.mode != modeConfirm {
+		t.Fatalf("the form did not reach a confirm dialog (status: %s)", a.status)
+	}
+
+	lines := strings.Split(a.confirm.Command, "\n$ ")
+	if lines[0] != "sudo -n install -d -m 2775 -o root -g staff /srv/photos" {
+		t.Errorf("the directory is not created first: %q", lines[0])
+	}
+	if !strings.Contains(a.confirm.Body, "/srv/photos does not exist yet") {
+		t.Errorf("the dialog does not say why:\n%s", a.confirm.Body)
+	}
+	// SELinux is off on the sample machine, so no label is asked for.
+	if strings.Contains(a.confirm.Command, "chcon") {
+		t.Errorf("a label was built on a machine with no SELinux: %q",
+			a.confirm.Command)
+	}
+
+	drain(t, a, press(a, "y"))
+	if len(backend.Ran()) != len(lines) {
+		t.Fatalf("ran %d commands, previewed %d", len(backend.Ran()), len(lines))
+	}
+	share, ok := a.model.Share("photos")
+	if !ok {
+		t.Fatalf("the new share is not in the inventory")
+	}
+	if !share.Dir.Exists || share.Dir.Mode != "2775" {
+		t.Errorf("the directory was not created: %+v", share.Dir)
+	}
+	if share.Has(shares.FindingPathMissing) {
+		t.Errorf("the new share still reports a missing path")
+	}
+}
+
+// TestAnExistingPathIsNeverTouched: the mode and the owner of a directory that
+// is already there are somebody's decision, and a share form does not overrule
+// them.
+func TestAnExistingPathIsNeverTouched(t *testing.T) {
+	a, _ := newTestApp(t)
+	drain(t, a, press(a, "n"))
+	setField(&a.form, fieldName, "public2")
+	setField(&a.form, fieldPath, "/srv/public")
+	drain(t, a, press(a, "enter"))
+	if a.mode != modeConfirm {
+		t.Fatalf("the form did not reach a confirm dialog (status: %s)", a.status)
+	}
+	if strings.Contains(a.confirm.Command, "install -d -m 2775") {
+		t.Errorf("an existing directory was re-created: %q", a.confirm.Command)
+	}
+}
+
+// TestTheServerFormRendersAtEveryWidth: the responsive contract covers the
+// second form too, which has fields the share form does not.
+func TestTheServerFormRendersAtEveryWidth(t *testing.T) {
+	a, _ := newTestApp(t)
+	a.mode = modeForm
+	a.form = newGlobalForm(a.model.Global)
+	for width := 40; width <= 200; width += 4 {
+		a.width, a.height = width, 24
+		checkWidth(t, a, "server form", width)
+	}
+	a.mode = modeBrowse
+}
+
+func TestSplitOwner(t *testing.T) {
+	tests := []struct {
+		value string
+		owner string
+		group string
+	}{
+		{"", "root", "root"},
+		{"alice", "alice", "alice"},
+		{"alice:staff", "alice", "staff"},
+		{" alice : staff ", "alice", "staff"},
+		// A trailing colon means the group was left out, which is what
+		// `chown alice` means too.
+		{"alice:", "alice", "alice"},
+	}
+	for _, test := range tests {
+		owner, group := splitOwner(test.value)
+		if owner != test.owner || group != test.group {
+			t.Errorf("splitOwner(%q) = %q, %q, want %q, %q", test.value, owner,
+				group, test.owner, test.group)
+		}
 	}
 }

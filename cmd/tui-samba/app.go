@@ -58,9 +58,18 @@ const (
 
 // The prompts a text input is ever opened for.
 const (
-	promptFilter   = "filter"
-	promptAddUser  = "add-user"
-	promptPassword = "password"
+	promptFilter      = "filter"
+	promptAddUser     = "add-user"
+	promptPassword    = "password"
+	promptDeleteShare = "delete-share"
+)
+
+// What a background build is building, so a failed one returns the reader to
+// the dialog they came from rather than to whichever was open last.
+const (
+	buildShare  = "share"
+	buildGlobal = "global"
+	buildDelete = "delete"
 )
 
 // app is the tui-samba Bubble Tea model.
@@ -94,13 +103,17 @@ type app struct {
 	confirm ui.Confirm
 	input   ui.Input
 	picker  ui.Picker
-	form    shareForm
+	form    guidedForm
 	// pickerFor names the form field an open picker is filling, and promptFor
 	// what an open text prompt is asking about.
 	pickerFor string
 	promptFor string
-	// promptUser is the account a password prompt is for.
+	// promptUser is the account a password prompt is for, or the share a typed
+	// removal is confirming.
 	promptUser string
+	// buildFor is what the background build in flight is building, so its
+	// failure returns the reader to the dialog they came from.
+	buildFor string
 
 	// selfTest is what the server last answered when it was asked for its own
 	// share list. It is not part of the model because it is not something the
@@ -220,10 +233,37 @@ func (a *app) run(p plan) tea.Cmd {
 // background.
 func (a *app) build(req shares.ShareRequest) tea.Cmd {
 	backend, model := a.backend, a.model
+	a.buildFor = buildShare
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
 		defer cancel()
 		built, err := backend.BuildShareWrite(ctx, model, req)
+		return builtMsg{plan: built, err: err}
+	}
+}
+
+// buildGlobalWrite stages the server-wide settings the same way.
+func (a *app) buildGlobalWrite(req shares.GlobalRequest) tea.Cmd {
+	backend, model := a.backend, a.model
+	a.buildFor = buildGlobal
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
+		defer cancel()
+		built, err := backend.BuildGlobalWrite(ctx, model, req)
+		return builtMsg{plan: built, err: err}
+	}
+}
+
+// buildShareDelete works out what removing a share would take, which means
+// reading the configuration to find out whether it is this tool's to remove at
+// all.
+func (a *app) buildShareDelete(name string) tea.Cmd {
+	backend, model := a.backend, a.model
+	a.buildFor = buildDelete
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
+		defer cancel()
+		built, err := backend.BuildShareDelete(ctx, model, name)
 		return builtMsg{plan: built, err: err}
 	}
 }
@@ -263,7 +303,12 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.busy = false
 		if msg.err != nil {
 			a.setStatus(ui.StatusError, msg.err.Error())
-			a.mode = modeForm
+			// A form can be corrected; a removal has nothing to go back to.
+			if a.buildFor == buildDelete {
+				a.mode = modeBrowse
+			} else {
+				a.mode = modeForm
+			}
 			return a, nil
 		}
 		a.openWrite(msg.plan)
@@ -387,6 +432,20 @@ func (a *app) handleInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		return a, a.confirmPassword(account, value)
+	case promptDeleteShare:
+		if !accepted {
+			a.setStatus(ui.StatusInfo, "cancelled")
+			return a, nil
+		}
+		if value != account {
+			a.setStatusf(ui.StatusWarn,
+				"that is not [%s], so nothing was removed", account)
+			return a, nil
+		}
+		a.busy = true
+		a.setStatusf(ui.StatusInfo,
+			"working out what removing [%s] would take…", account)
+		return a, a.buildShareDelete(account)
 	}
 
 	if accepted {
@@ -458,6 +517,12 @@ func (a *app) handleForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // submitForm hands the form to the backend, which stages the file and has
 // Samba read it back before anything is confirmed.
 func (a *app) submitForm() tea.Cmd {
+	if a.form.kind == formGlobal {
+		a.busy = true
+		a.setStatus(ui.StatusInfo,
+			"staging the configuration and asking testparm to read it…")
+		return a.buildGlobalWrite(a.form.globalRequest())
+	}
 	request, err := a.form.request()
 	if err != nil {
 		a.setStatus(ui.StatusError, err.Error())
@@ -652,6 +717,10 @@ func (a *app) handleActionKey(msg tea.KeyMsg) tea.Cmd {
 		return a.openShareForm(false)
 	case "n":
 		return a.openShareForm(true)
+	case "X":
+		return a.askDeleteShare()
+	case "o":
+		return a.openGlobalForm()
 	case "a":
 		return a.openAddUser()
 	case "p":
@@ -698,6 +767,58 @@ func (a *app) openShareForm(create bool) tea.Cmd {
 	}
 	a.form = newShareForm(share, false)
 	a.mode = modeForm
+	return nil
+}
+
+// openGlobalForm opens the server-wide editor, seeded from what the server
+// itself resolved.
+func (a *app) openGlobalForm() tea.Cmd {
+	if !a.caps.CanEditShares {
+		reason := a.caps.EditReason
+		if reason == "" {
+			reason = "this backend cannot write a configuration"
+		}
+		a.setStatus(ui.StatusWarn, reason)
+		return nil
+	}
+	a.form = newGlobalForm(a.model.Global)
+	a.mode = modeForm
+	return nil
+}
+
+// askDeleteShare asks for the share's name to be typed back before anything is
+// built.
+//
+// Typing it is the deliberate step. A removal is the one change here that
+// cannot be undone by making the opposite change — the file is gone, and with
+// it every parameter of the share that this form never asked about — so it
+// takes a keystroke that cannot be the wrong row under a cursor.
+func (a *app) askDeleteShare() tea.Cmd {
+	if !a.caps.CanEditShares {
+		reason := a.caps.EditReason
+		if reason == "" {
+			reason = "this backend cannot write a share"
+		}
+		a.setStatus(ui.StatusWarn, reason)
+		return nil
+	}
+	share, ok := a.selectedShare()
+	if !ok {
+		a.setStatus(ui.StatusWarn,
+			"no share selected — press 1 for the shares screen")
+		return nil
+	}
+	if err := samba.CheckShareName(share.Name); err != nil {
+		a.setStatus(ui.StatusWarn, err.Error())
+		return nil
+	}
+	a.input = ui.NewInput("Remove the share ["+share.Name+"]",
+		"type "+share.Name+" to confirm…", "")
+	a.input.Help = "Only a share tui-samba wrote can be removed here: its own " +
+		"drop-in file goes, and so does the one `include` line that reached it. " +
+		"The exported directory and everything in it are left alone. The exact " +
+		"commands are shown before any of them runs."
+	a.promptFor, a.promptUser, a.mode = promptDeleteShare, share.Name, modeInput
 	return nil
 }
 

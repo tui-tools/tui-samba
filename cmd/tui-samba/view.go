@@ -202,9 +202,10 @@ func (a *app) defaultStatus() string {
 	case screenConnections:
 		return count + " rows  ·  R re-reads" + suffix
 	case screenServer:
-		return count + " facts  ·  r reloads, t asks what a client sees" + suffix
+		return count + " facts  ·  g edits, r reloads, t asks what a client sees" +
+			suffix
 	default:
-		return count + " shares  ·  e edits, n adds" + suffix
+		return count + " shares  ·  e edits, n adds, X removes" + suffix
 	}
 }
 
@@ -576,7 +577,9 @@ func (a *app) shareDetail() []string {
 		lines = append(lines, "  "+ui.Pad(key, 24)+share.Params[key])
 	}
 	lines = append(lines, "",
-		"  press e to change this share, with a diff to confirm")
+		"  press e to change this share, with a diff to confirm, or X to remove",
+		"  it — which only works on a share tui-samba wrote, and never touches",
+		"  the directory it exports")
 	return lines
 }
 
@@ -672,6 +675,9 @@ func (a *app) serverDetail() []string {
 	for _, key := range a.model.Global.ParamKeys() {
 		lines = append(lines, "  "+ui.Pad(key, 26)+a.model.Global.Params[key])
 	}
+	lines = append(lines, "",
+		"  press g to change the workgroup, the minimum protocol and the host",
+		"  list, written to a drop-in of tui-samba's own and diffed first")
 	return lines
 }
 
@@ -711,12 +717,14 @@ func (a *app) shortHelpKeys() []ui.KeyHint {
 		hints = append(hints, ui.KeyHint{Key: "R", Desc: "re-read"})
 	case screenServer:
 		hints = append(hints,
+			ui.KeyHint{Key: "o", Desc: "settings"},
 			ui.KeyHint{Key: "r", Desc: "reload"},
 			ui.KeyHint{Key: "t", Desc: "self-test"})
 	default:
 		hints = append(hints,
 			ui.KeyHint{Key: "e", Desc: "edit"},
-			ui.KeyHint{Key: "n", Desc: "new"})
+			ui.KeyHint{Key: "n", Desc: "new"},
+			ui.KeyHint{Key: "X", Desc: "remove"})
 	}
 	return append(hints,
 		ui.KeyHint{Key: "/", Desc: "filter"},
@@ -735,7 +743,9 @@ func helpKeys() []ui.KeyHint {
 		{Key: "esc", Desc: "leave the detail screen"},
 		{Key: "/", Desc: "filter this screen (esc clears)"},
 		{Key: "e", Desc: "edit the selected share, with a diff to confirm"},
-		{Key: "n", Desc: "add a share"},
+		{Key: "n", Desc: "add a share, offering to create its directory too"},
+		{Key: "X", Desc: "remove a share tui-samba wrote, name typed back first"},
+		{Key: "o", Desc: "edit the server settings: workgroup, dialects, hosts allow"},
 		{Key: "a", Desc: "add a Samba account, password read from stdin"},
 		{Key: "p", Desc: "set the selected account's password"},
 		{Key: "E / D", Desc: "enable / disable the selected account"},

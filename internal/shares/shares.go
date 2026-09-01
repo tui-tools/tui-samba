@@ -615,6 +615,29 @@ type ShareRequest struct {
 	// CreateMask and DirectoryMask are octal strings.
 	CreateMask    string
 	DirectoryMask string
+	// CreatePath is "yes" when the plan may also create the exported
+	// directory. It is collected as a string like the other flags, and it only
+	// produces a command when the directory really is not there: a share
+	// whose path exists is never touched on the Unix side.
+	CreatePath string
+	// Owner and Group are who a directory this plan creates belongs to. They
+	// are ignored when the directory already exists.
+	Owner string
+	Group string
+}
+
+// GlobalRequest is what the server-wide form collected. Like a ShareRequest
+// every value is still a string, because what a workgroup, a dialect and a
+// host list may be is the backend's rule, checked once, where the file is
+// built.
+type GlobalRequest struct {
+	// Workgroup is the NetBIOS workgroup a client sees in a browse list.
+	Workgroup string
+	// MinProtocol is the lowest dialect the server will speak, as Samba spells
+	// it ("SMB2_02").
+	MinProtocol string
+	// HostsAllow is as typed, space or comma separated.
+	HostsAllow string
 }
 
 // WritePlan is a change the user is about to make: what the file will look
@@ -678,6 +701,14 @@ type Backend interface {
 	// BuildShareWrite stages the new configuration, has the server's own
 	// parser check it, and returns the plan that installs it.
 	BuildShareWrite(ctx context.Context, model Model, req ShareRequest) (WritePlan, error)
+	// BuildShareDelete returns the plan that removes a share this tool wrote:
+	// its drop-in file, and the one `include` line that reached it. A share
+	// defined anywhere else is refused with the reason, because removing it
+	// would mean editing a file somebody else owns.
+	BuildShareDelete(ctx context.Context, model Model, name string) (WritePlan, error)
+	// BuildGlobalWrite stages the server-wide settings into a drop-in of this
+	// tool's own, checked and diffed like a share.
+	BuildGlobalWrite(ctx context.Context, model Model, req GlobalRequest) (WritePlan, error)
 
 	// BuildUserAdd adds an account to the password database. The password is
 	// carried on the command's standard input, never in an argv.
