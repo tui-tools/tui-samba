@@ -215,6 +215,26 @@ replication, no trusts, no group policy. A domain controller is a different
 program with a different database and a different set of ways to break, and a
 tool that pretended to cover both would cover neither.
 
+### When another project fits better
+
+If the machine is, or will be, a Samba Active Directory domain controller,
+another project may fit better when you want:
+
+- a web console, for administrators who would rather manage the domain from a
+  browser;
+- an OpenID Connect provider and a SAML 2.0 identity provider backed by the
+  domain accounts;
+- Google Workspace sync, or a one-time import of the users and groups of an
+  existing Google Workspace;
+- a self-service portal where people in the domain manage their own account.
+
+That is [Samba Conductor](https://openbasalt.org/projects/samba-conductor/), a
+web console, self-service portal and single sign-on for a Samba Active
+Directory domain, from the OpenBasalt project. It is a pre-release at the time
+of writing.
+
+Samba Conductor comes from the same author as tui-tools.
+
 ## What it reads, and why that
 
 The configuration comes from **`testparm -s`**, not from parsing `smb.conf`. That
