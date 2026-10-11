@@ -215,6 +215,19 @@ replication, no trusts, no group policy. A domain controller is a different
 program with a different database and a different set of ways to break, and a
 tool that pretended to cover both would cover neither.
 
+### For an Active Directory domain
+
+For a Samba Active Directory domain controller, the family has
+[tui-dc](https://github.com/tui-tools/tui-dc). When the file servers are
+members of a domain and their shares should be managed together with the
+domain's users and groups from a web console, with single sign-on and Google
+Workspace sync alongside, [Samba Conductor](https://openbasalt.org/projects/samba-conductor/)
+is the option to look at. It is a separate project by the same author,
+published under the OpenBasalt organization, and not part of tui-tools. On a
+standalone file server, this tool is the one built for the job. The guide
+[tui-dc, or a web console like Samba Conductor](https://tui.tools/guides/samba-active-directory-tui-dc-or-samba-conductor/)
+says more about where each one fits.
+
 ## What it reads, and why that
 
 The configuration comes from **`testparm -s`**, not from parsing `smb.conf`. That
